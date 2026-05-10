@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: localware_pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: localware_fund
+      POSTGRES_USER: localware
+      POSTGRES_PASSWORD: localware
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d
+volumes:
+  pgdata:
