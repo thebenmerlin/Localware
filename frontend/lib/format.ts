@@ -28,3 +28,11 @@ export function signed(x: number | null | undefined, digits = 2): string {
   if (x === null || x === undefined || Number.isNaN(x)) return "—";
   return `${x > 0 ? "+" : ""}${x.toFixed(digits)}`;
 }
+
+export function formatY(v: number, fmt?: string): string {
+  if (fmt === "money") return money(v);
+  if (fmt === "num2") return num(v, 2);
+  if (fmt === "pct1") return pct(v, 1);
+  if (fmt === "pct2") return pct(v, 2);
+  return v.toString();
+}

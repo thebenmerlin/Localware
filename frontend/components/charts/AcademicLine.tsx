@@ -5,18 +5,10 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { useThemeColors } from "@/lib/useThemeColors";
-import { pct, num, money } from "@/lib/format";
+import { formatY } from "@/lib/format";
 
 type Pt = Record<string, number | string | null>;
 type YKey = { key: string; label?: string; color?: keyof Pick<ReturnType<typeof useThemeColors>, "academic"|"crimson"|"ink"|"positive"|"negative"|"muted">; dash?: string };
-
-function formatY(v: number, fmt?: string) {
-  if (fmt === "money") return money(v);
-  if (fmt === "num2") return num(v, 2);
-  if (fmt === "pct1") return pct(v, 1);
-  if (fmt === "pct2") return pct(v, 2);
-  return v.toString();
-}
 
 function formatX(v: string, fmt?: string) {
   if (fmt === "YYYY-MM") return String(v).slice(0, 7);
@@ -50,7 +42,7 @@ export function AcademicLine({
           tick={{ fill: t.muted, fontSize: 11 }}
         />
         <YAxis
-          tickFormatter={yFmt}
+          tickFormatter={(v) => formatY(v as number, yFmt)}
           tickLine={false}
           axisLine={{ stroke: t.ink, strokeWidth: 0.5 }}
           width={56}
@@ -67,7 +59,7 @@ export function AcademicLine({
           }}
           itemStyle={{ color: t.ink }}
           labelStyle={{ color: t.ink }}
-          formatter={(v: number) => (yFmt ? yFmt(v) : v)}
+          formatter={(v: number) => formatY(v, yFmt)}
         />
         {refY !== undefined && (
           <ReferenceLine y={refY} stroke={t.ink} strokeDasharray="2 3" strokeWidth={0.5} />

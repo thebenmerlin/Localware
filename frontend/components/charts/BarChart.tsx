@@ -2,6 +2,7 @@
 
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell } from "recharts";
 import { useThemeColors } from "@/lib/useThemeColors";
+import { formatY } from "@/lib/format";
 
 export function AcademicBar({
   data, xKey, yKey, height = 240, yFmt, signed,
