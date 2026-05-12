@@ -36,6 +36,7 @@ import numpy as np
 import pandas as pd
 
 from .lib import db
+from .portfolio_optimizer import solve_ensemble
 
 
 # --- spec-driven tunables ---------------------------------------------------
@@ -91,6 +92,27 @@ def _load_price_panel(as_of: dt.date, days: int = 100) -> pd.DataFrame:
           .sort_index()
           .astype(float)
           .ffill(limit=2)
+    )
+
+
+def _load_prev_weights(as_of: dt.date) -> pd.Series:
+    """Most recent filled target weights from portfolio.positions_daily on or
+    before `as_of`. Indexed by ticker. Empty Series on cold start."""
+    rows = db.query(
+        """
+        SELECT s.ticker, p.target_weight
+        FROM portfolio.positions_daily p
+        JOIN securities s ON s.id = p.security_id
+        WHERE p.date = (
+            SELECT MAX(date) FROM portfolio.positions_daily WHERE date <= %s
+        );
+        """,
+        (as_of,),
+    )
+    if not rows:
+        return pd.Series(dtype=float)
+    return pd.Series(
+        {r["ticker"]: float(r["target_weight"]) for r in rows}, dtype=float,
     )
 
 
@@ -227,11 +249,46 @@ def construct(as_of: dt.date | None = None) -> pd.DataFrame:
         print("No signals for this date.")
         return pd.DataFrame()
 
-    pre = sigs["blended_signal"].astype(float).copy()
+    alpha_raw = sigs["blended_signal"].astype(float).copy()
     sectors = sigs["sector"].astype("string")
     sids = sigs["security_id"].astype(int)
 
+    # --- Filter out tickers with unknown sectors before optimization.
+    # solve_ensemble builds one neutrality constraint row per unique sector
+    # label; allowing NaN / "?" creates a spurious "Unknown" bucket that the
+    # optimizer would dutifully neutralize against, distorting weights.
+    known_mask = sectors.notna() & (sectors.str.strip() != "") & (sectors != "?")
+    n_unknown = int((~known_mask).sum())
+    if n_unknown:
+        print(f"  dropping {n_unknown} tickers with unknown sector before optimization")
+    alpha = alpha_raw[known_mask]
+    sectors_known = sectors[known_mask]
+
     panel = _load_price_panel(as_of)
+    prev_w = _load_prev_weights(as_of)
+    print(f"  prev positions loaded: {len(prev_w)} names "
+          f"(gross={float(prev_w.abs().sum()):.4f})")
+
+    # QP ensemble: equal-weighted across (risk, turnover, lookback, neutrality)
+    # grid; returns a pre-overlay weight vector that we then feed through the
+    # existing vol / DD / cap pipeline.
+    member_w = load_latest_member_weights(as_of)
+    print(f"  loaded {len(member_w)} member scores (sum={float(member_w.sum()):.2f})")
+
+    pre_opt = solve_ensemble(
+        alpha=alpha,
+        panel=panel,
+        sectors=sectors_known,
+        prev_w=prev_w,
+        benchmark=None,  # wire up market ETF once it lives in `securities`
+        member_weights=member_w if not member_w.empty else None,
+    )
+    # Re-index to the full signal universe so downstream code (sids lookup,
+    # bulk_upsert) still sees every ticker; missing names become 0 weight.
+    pre = pre_opt.reindex(alpha_raw.index).fillna(0.0)
+    print(f"  ensemble pre-overlay: nonzero={int((pre.abs() > 1e-8).sum())}  "
+          f"gross={float(pre.abs().sum()):.4f}  net={float(pre.sum()):+.4f}")
+
     realized = _portfolio_vol(pre, panel, VOL_LOOKBACK)
     if realized > 0:
         raw_scalar = VOL_TARGET / realized

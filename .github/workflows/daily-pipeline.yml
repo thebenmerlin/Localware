@@ -53,6 +53,9 @@ jobs:
       - name: 3) Generate blended signals
         run: python -m workers.strategy_runner
 
+      - name: 3.5) Score ensemble walk-forward
+        run: python -m workers.score_ensemble
+
       - name: 4) Construct target portfolio
         run: python -m workers.portfolio_constructor
 
