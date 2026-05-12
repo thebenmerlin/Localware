@@ -145,7 +145,7 @@ export default async function Page() {
         <AcademicLine
           data={rollData}
           xKey="date"
-          yKeys={[{ key: "sharpe", color: "#1a1a18" }]}
+          yKeys={[{ key: "sharpe", color: "ink" }]}
           height={200}
           refY={0}
           yFmt={(v) => num(v, 2)}
