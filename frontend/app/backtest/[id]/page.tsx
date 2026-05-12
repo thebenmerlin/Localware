@@ -5,7 +5,7 @@ import { PaperTable } from "@/components/paper/PaperTable";
 import { AcademicLine } from "@/components/charts/AcademicLine";
 import { pct, num, money, date as fmtDate } from "@/lib/format";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

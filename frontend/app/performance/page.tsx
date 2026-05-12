@@ -11,7 +11,7 @@ import { AcademicLine } from "@/components/charts/AcademicLine";
 import { MonthlyHeatmap } from "@/components/charts/Heatmap";
 import { pct, num, money } from "@/lib/format";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export default async function Page() {
   const [equity, metricsRows, drawdown, monthly, rolling] = await Promise.all([

@@ -3,7 +3,7 @@ import { getBacktests } from "@/lib/queries";
 import { PaperTable } from "@/components/paper/PaperTable";
 import { pct, num, date as fmtDate } from "@/lib/format";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export default async function Page() {
   const list = await getBacktests();

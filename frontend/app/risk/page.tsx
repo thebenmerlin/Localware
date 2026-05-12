@@ -5,7 +5,7 @@ import { AcademicLine } from "@/components/charts/AcademicLine";
 import { Equation, InlineEq } from "@/components/paper/Equation";
 import { pct, num } from "@/lib/format";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 const FACTOR_DESC: Record<string, string> = {
   alpha_daily: "Intercept of daily-frequency factor regression — the unexplained excess return.",

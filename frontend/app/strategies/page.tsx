@@ -3,7 +3,7 @@ import { PaperTable } from "@/components/paper/PaperTable";
 import { pct, money, num } from "@/lib/format";
 import { InlineEq } from "@/components/paper/Equation";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 const FORMULAS: Record<string, string> = {
   momentum:        "r^{12,1}_i = \\frac{P_{t-21}}{P_{t-252}} - 1",

@@ -12,9 +12,10 @@ declare global {
 export const sql =
   globalThis.__sql ??
   postgres(url, {
-    max: 10,
-    idle_timeout: 20,
-    connect_timeout: 5,
+    max: 1,
+    idle_timeout: 5,
+    max_lifetime: 60,
+    connect_timeout: 15,
     transform: { undefined: null },
   });
 

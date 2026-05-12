@@ -5,7 +5,7 @@ import { AcademicLine } from "@/components/charts/AcademicLine";
 import { MonthlyHeatmap } from "@/components/charts/Heatmap";
 import { pct, num, signed } from "@/lib/format";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 type Metric = {
   period: string; as_of: string; total_return: number; ann_return: number;

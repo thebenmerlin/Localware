@@ -2,7 +2,7 @@ import { getRecentTrades } from "@/lib/queries";
 import { PaperTable } from "@/components/paper/PaperTable";
 import { money, num } from "@/lib/format";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export default async function Page() {
   const trades = await getRecentTrades(500);

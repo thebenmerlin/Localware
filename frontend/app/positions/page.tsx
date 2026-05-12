@@ -4,7 +4,7 @@ import { Figure } from "@/components/paper/Figure";
 import { AcademicBar } from "@/components/charts/BarChart";
 import { pct, money, num, signed } from "@/lib/format";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export default async function Page() {
   const [positions, sectors] = await Promise.all([getCurrentPositions(), getSectorExposure()]);

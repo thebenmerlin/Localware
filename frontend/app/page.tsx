@@ -13,7 +13,7 @@ import { Abstract, Lede } from "@/components/paper/Section";
 import { AcademicLine } from "@/components/charts/AcademicLine";
 import { pct, money, num, signed } from "@/lib/format";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export default async function Page() {
   const [nav, equity, metrics, positions, trades, sectors] = await Promise.all([
