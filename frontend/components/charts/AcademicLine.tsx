@@ -43,7 +43,7 @@ export function AcademicLine({
         <CartesianGrid stroke={t.grid} strokeDasharray="1 2" />
         <XAxis
           dataKey={xKey}
-          tickFormatter={xFmt}
+          tickFormatter={(v) => formatX(v, xFmt)}
           tickLine={false}
           axisLine={{ stroke: t.ink, strokeWidth: 0.5 }}
           minTickGap={48}
