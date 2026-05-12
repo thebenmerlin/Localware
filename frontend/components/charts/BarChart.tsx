@@ -59,12 +59,3 @@ export function AcademicBar({
     </ResponsiveContainer>
   );
 }
- Number(d[yKey]) || 0;
-            const color = signed ? (v >= 0 ? t.positive : t.negative) : t.academic;
-            return <Cell key={i} fill={color} />;
-          })}
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
