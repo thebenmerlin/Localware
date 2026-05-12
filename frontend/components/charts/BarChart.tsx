@@ -10,7 +10,7 @@ export function AcademicBar({
   xKey: string;
   yKey: string;
   height?: number;
-  yFmt?: (v: number) => string;
+  yFmt?: string;
   signed?: boolean;
 }) {
   const t = useThemeColors();
