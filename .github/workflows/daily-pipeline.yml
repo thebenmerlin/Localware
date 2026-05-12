@@ -1,0 +1,71 @@
+name: Daily pipeline
+
+# Runs Mon–Fri at 16:30 ET (20:30 UTC) plus manual trigger.
+# Note: 20:30 UTC = 16:30 EDT (Mar–Nov) / 15:30 EST (Nov–Mar). The user spec
+# pins the UTC time so the schedule is stable year-round.
+on:
+  schedule:
+    - cron: "30 20 * * 1-5"
+  workflow_dispatch:
+
+# Prevent two daily runs from clobbering each other if one drags. We never
+# cancel a running job — partial work is preserved via idempotent upserts.
+concurrency:
+  group: daily-pipeline
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 270   # soft 4.5h kill switch (under the 6h GHA hard limit)
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      INITIAL_NAV: ${{ vars.INITIAL_NAV || '10000000' }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: workers/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r workers/requirements.txt
+
+      - name: Verify secrets
+        run: |
+          if [ -z "${DATABASE_URL}" ]; then
+            echo "::error::DATABASE_URL secret is not configured"
+            exit 1
+          fi
+          echo "DATABASE_URL is set (length=${#DATABASE_URL})"
+
+      - name: 1) Fetch prices (incremental)
+        run: python -m workers.fetch_prices
+
+      - name: 2) Fetch fundamentals
+        run: python -m workers.fetch_fundamentals
+
+      - name: 3) Generate blended signals
+        run: python -m workers.strategy_runner
+
+      - name: 4) Construct target portfolio
+        run: python -m workers.portfolio_constructor
+
+      - name: 5) Execute single-day NAV update
+        run: python -m workers.executor
+
+      - name: 6) Refresh performance analytics
+        run: python -m workers.performance
+
+      - name: 7) Refresh risk analytics
+        run: python -m workers.risk_engine
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "Pipeline finished at $(date -u +'%Y-%m-%dT%H:%M:%SZ')"

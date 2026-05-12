@@ -1,179 +1,295 @@
-"""Portfolio constructor — combines strategy signals into target weights.
+"""Portfolio constructor — blended signal → risk-managed target weights.
 
-Algorithm:
-  1. For each enabled strategy, sum its signals (weighted by allocation_weight).
-  2. Apply per-name cap (5%), per-sector cap (25%).
-  3. Volatility-target the portfolio: scale gross to hit 12% annualized vol.
-  4. Drawdown overlay: if rolling DD > 8%, halve gross exposure.
-  5. Output target weights as a snapshot; executor will diff against current
-     positions and place trades.
+Reads:
+  derived.signals_daily       blended signal per ticker for `as_of`
+  raw.ohlcv_daily             60d panel for portfolio-vol estimation
+  securities                  sector mapping
+  portfolio_nav (optional)    most recent NAV history for drawdown overlay
+
+Writes:
+  portfolio.positions_daily   target weights effective on the NEXT business day
+
+Pipeline (single pass, fully vectorized):
+  1. Load blended signals as a pd.Series indexed by ticker.
+  2. Estimate annualized portfolio vol from the 60d return covariance.
+  3. vol scalar = clip(VOL_TARGET / realized, [0.2, 2.0]).
+  4. drawdown overlay: scalar *= 0.5 if current DD > 8%.
+  5. Apply scalar.
+  6. Per-name cap: clip(|w|) to 5%.
+  7. Per-sector cap: proportionally scale down sectors whose long gross
+     (or short gross) exceeds 25%.
+  8. Gross leverage cap: scale all weights so Σ|w| ≤ 1.5.
+  9. Upsert to portfolio.positions_daily with date = next business day.
+
+No per-ticker or per-date loops anywhere in the math path.
+
+CLI:
+  python -m workers.portfolio_constructor
+  python -m workers.portfolio_constructor --as-of 2026-05-09
 """
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 
 import numpy as np
 import pandas as pd
 
-from .lib import db, mathx
+from .lib import db
 
 
-PER_NAME_CAP = 0.05
-PER_SECTOR_CAP = 0.30
-VOL_TARGET = 0.13   # 13% ann
-DD_OVERLAY_TRIGGER = 0.09
-DD_OVERLAY_FACTOR = 0.6
-MAX_GROSS = 1.7
+# --- spec-driven tunables ---------------------------------------------------
+
+VOL_TARGET = 0.12          # 12% annualized portfolio vol
+DD_TRIGGER = 0.08          # halve gross above this drawdown
+DD_FACTOR = 0.5
+PER_NAME_CAP = 0.05        # 5% per name
+PER_SECTOR_CAP = 0.25      # 25% per sector (each side)
+MAX_GROSS = 1.5            # 1.5× max gross leverage
+
+VOL_LOOKBACK = 60
+VOL_SCALAR_CLAMP = (0.2, 2.0)
 
 
-def _price_panel(as_of: dt.date, lookback: int = 90) -> pd.DataFrame:
-    start = as_of - dt.timedelta(days=int(lookback * 1.6))
+# --- I/O --------------------------------------------------------------------
+
+def _load_signals(as_of: dt.date) -> pd.DataFrame:
     rows = db.query(
         """
-        SELECT s.ticker, p.date, p.adj_close
-        FROM prices p JOIN securities s ON s.id = p.security_id
+        SELECT s.ticker, s.id AS security_id, s.sector, sd.blended_signal
+        FROM derived.signals_daily sd
+        JOIN securities s ON s.id = sd.security_id
+        WHERE sd.date = %s;
+        """,
+        (as_of,),
+    )
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    df["blended_signal"] = pd.to_numeric(df["blended_signal"])
+    return df.set_index("ticker")
+
+
+def _load_price_panel(as_of: dt.date, days: int = 100) -> pd.DataFrame:
+    start = as_of - dt.timedelta(days=int(days * 1.7))
+    rows = db.query(
+        """
+        SELECT s.ticker, o.date, o.adj_close
+        FROM raw.ohlcv_daily o
+        JOIN securities s ON s.id = o.security_id
         WHERE s.active = TRUE AND s.asset_class = 'equity'
-          AND p.date BETWEEN %s AND %s;
+          AND o.date BETWEEN %s AND %s;
         """,
         (start, as_of),
     )
     if not rows:
         return pd.DataFrame()
     df = pd.DataFrame(rows)
-    df["adj_close"] = pd.to_numeric(df["adj_close"])
-    return df.pivot(index="date", columns="ticker", values="adj_close").sort_index().ffill()
+    df["date"] = pd.to_datetime(df["date"])
+    return (
+        df.pivot(index="date", columns="ticker", values="adj_close")
+          .sort_index()
+          .astype(float)
+          .ffill(limit=2)
+    )
 
 
-def _signals(as_of: dt.date) -> pd.DataFrame:
+def _current_drawdown(as_of: dt.date) -> float:
+    """Returns drawdown as a positive number (0.10 = 10% below peak)."""
     rows = db.query(
-        """
-        SELECT st.name AS strategy, st.allocation_weight, s.ticker, sec.sector,
-               sg.signal
-        FROM signals sg
-        JOIN strategies st ON st.id = sg.strategy_id
-        JOIN securities sec ON sec.id = sg.security_id
-        JOIN securities s ON s.id = sg.security_id
-        WHERE sg.date = %s AND st.enabled = TRUE;
-        """,
+        "SELECT nav FROM portfolio.nav_daily WHERE date <= %s ORDER BY date;",
         (as_of,),
     )
-    return pd.DataFrame(rows)
+    if not rows or len(rows) < 2:
+        return 0.0
+    navs = pd.Series([float(r["nav"]) for r in rows])
+    peak = navs.cummax()
+    dd = (navs - peak) / peak
+    return float(-dd.iloc[-1])
 
 
-def _current_dd(as_of: dt.date) -> float:
-    """Drawdown right now: (latest NAV - running peak NAV) / running peak NAV."""
-    rows = db.query(
-        "SELECT date, nav FROM portfolio_nav WHERE date <= %s ORDER BY date;",
-        (as_of,),
-    )
-    if not rows:
-        return 0.0
-    s = pd.Series([float(r["nav"]) for r in rows])
-    if len(s) < 2:
-        return 0.0
-    peak = float(s.cummax().iloc[-1])
-    cur = float(s.iloc[-1])
-    if peak <= 0:
-        return 0.0
-    return max(0.0, (peak - cur) / peak)
+# --- vectorized risk math ---------------------------------------------------
 
-
-def _portfolio_vol(weights: dict[str, float], panel: pd.DataFrame) -> float:
-    if not weights:
+def _portfolio_vol(weights: pd.Series, panel: pd.DataFrame, lookback: int) -> float:
+    common = weights.index.intersection(panel.columns)
+    if len(common) == 0:
         return 0.0
-    rets = panel.pct_change().dropna(how="all").tail(60)
-    common = [t for t in weights if t in rets.columns]
-    if not common:
+    rets = panel[common].pct_change().iloc[-lookback:].dropna(how="all")
+    if rets.empty:
         return 0.0
-    w = np.array([weights[t] for t in common])
-    R = rets[common].fillna(0).values
-    cov = np.cov(R.T) * 252
+    rets = rets.fillna(0.0)
+    w = weights.loc[common].values.astype(float)
+    cov = np.cov(rets.values, rowvar=False) * 252
     if cov.ndim == 0:
         cov = np.array([[float(cov)]])
     var = float(w @ cov @ w)
-    return float(np.sqrt(max(var, 0)))
+    return float(np.sqrt(max(var, 0.0)))
 
 
-def _apply_caps(target: dict[str, float], sectors: dict[str, str]) -> dict[str, float]:
-    # per-name
-    for t in list(target.keys()):
-        target[t] = float(np.clip(target[t], -PER_NAME_CAP, PER_NAME_CAP))
-    # per-sector long only (caps positive sums)
-    by_sector: dict[str, float] = {}
-    for t, w in target.items():
-        if w > 0:
-            by_sector.setdefault(sectors.get(t, "?"), 0.0)
-            by_sector[sectors.get(t, "?")] += w
-    for sec, total in by_sector.items():
-        if total > PER_SECTOR_CAP:
-            scale = PER_SECTOR_CAP / total
-            for t, w in list(target.items()):
-                if w > 0 and sectors.get(t) == sec:
-                    target[t] = w * scale
-    return target
+def _apply_per_name_cap(weights: pd.Series, cap: float) -> pd.Series:
+    return weights.clip(lower=-cap, upper=cap)
 
 
-def _target_table(as_of: dt.date) -> pd.DataFrame:
-    sigs = _signals(as_of)
-    if sigs.empty:
-        return pd.DataFrame()
-    sigs["signal"] = pd.to_numeric(sigs["signal"])
-    sigs["allocation_weight"] = pd.to_numeric(sigs["allocation_weight"])
-    sigs["weighted"] = sigs["signal"] * sigs["allocation_weight"]
-    agg = sigs.groupby("ticker", as_index=False).agg(
-        weight=("weighted", "sum"),
-        sector=("sector", "first"),
-    )
-    return agg
+def _apply_sector_cap(weights: pd.Series, sectors: pd.Series, cap: float) -> pd.Series:
+    """Scale long/short halves separately so per-sector gross ≤ cap."""
+    if weights.empty:
+        return weights
+    sec = sectors.reindex(weights.index).fillna("?")
+
+    long_w = weights.where(weights > 0, 0.0)
+    short_w = (-weights).where(weights < 0, 0.0)
+
+    long_sums = long_w.groupby(sec).sum()
+    short_sums = short_w.groupby(sec).sum()
+
+    long_scale = (cap / long_sums.replace(0, np.nan)).clip(upper=1.0).fillna(1.0)
+    short_scale = (cap / short_sums.replace(0, np.nan)).clip(upper=1.0).fillna(1.0)
+
+    long_factor = sec.map(long_scale).astype(float).fillna(1.0)
+    short_factor = sec.map(short_scale).astype(float).fillna(1.0)
+
+    factor = pd.Series(1.0, index=weights.index)
+    long_mask = weights > 0
+    short_mask = weights < 0
+    factor.loc[long_mask] = long_factor.loc[long_mask]
+    factor.loc[short_mask] = short_factor.loc[short_mask]
+    return weights * factor
+
+
+def _cap_gross(weights: pd.Series, max_gross: float) -> pd.Series:
+    gross = float(weights.abs().sum())
+    if gross <= max_gross or gross == 0:
+        return weights
+    return weights * (max_gross / gross)
+
+
+# --- pure risk pipeline (used by both single-day & backtest paths) ---------
+
+def apply_overlays(
+    blended: pd.Series,
+    sectors: pd.Series | dict,
+    panel: pd.DataFrame,
+    drawdown: float = 0.0,
+    vol_target: float = VOL_TARGET,
+    dd_trigger: float = DD_TRIGGER,
+    dd_factor: float = DD_FACTOR,
+    per_name_cap: float = PER_NAME_CAP,
+    per_sector_cap: float = PER_SECTOR_CAP,
+    max_gross: float = MAX_GROSS,
+    vol_lookback: int = VOL_LOOKBACK,
+    vol_scalar_clamp: tuple[float, float] = VOL_SCALAR_CLAMP,
+) -> pd.Series:
+    """vol-target → DD overlay → per-name cap → per-sector cap → gross cap."""
+    pre = blended.astype(float)
+    if pre.empty:
+        return pre
+    realized = _portfolio_vol(pre, panel, vol_lookback)
+    if realized > 0:
+        vol_scalar = float(np.clip(vol_target / realized, *vol_scalar_clamp))
+    else:
+        vol_scalar = 1.0
+    dd_f = dd_factor if drawdown > dd_trigger else 1.0
+    scalar = vol_scalar * dd_f
+
+    sec_series = sectors if isinstance(sectors, pd.Series) else pd.Series(sectors)
+    w = pre * scalar
+    w = _apply_per_name_cap(w, per_name_cap)
+    w = _apply_sector_cap(w, sec_series, per_sector_cap)
+    w = _cap_gross(w, max_gross)
+    return w[w.abs() > 1e-6]
+
+
+# --- next business day ------------------------------------------------------
+
+def _next_business_day(d: dt.date) -> dt.date:
+    return (pd.Timestamp(d) + pd.tseries.offsets.BDay(1)).date()
+
+
+# --- main -------------------------------------------------------------------
+
+POSITIONS_TABLE = "portfolio.positions_daily"
+POSITIONS_COLS = [
+    "security_id", "date", "target_weight", "pre_overlay_weight", "sector",
+]
 
 
 def construct(as_of: dt.date | None = None) -> pd.DataFrame:
     if as_of is None:
-        rows = db.query("SELECT MAX(date) AS d FROM signals;")
-        as_of = rows[0]["d"]
+        rows = db.query("SELECT MAX(date) AS d FROM derived.signals_daily;")
+        as_of = rows[0]["d"] if rows else None
         if as_of is None:
+            print("No signals in derived.signals_daily — nothing to construct.")
             return pd.DataFrame()
 
-    table = _target_table(as_of)
-    if table.empty:
-        return table
+    print(f"Portfolio constructor @ signal_date={as_of}")
+    sigs = _load_signals(as_of)
+    if sigs.empty:
+        print("No signals for this date.")
+        return pd.DataFrame()
 
-    sectors = dict(zip(table["ticker"], table["sector"]))
-    weights = dict(zip(table["ticker"], table["weight"]))
+    pre = sigs["blended_signal"].astype(float).copy()
+    sectors = sigs["sector"].astype("string")
+    sids = sigs["security_id"].astype(int)
 
-    weights = _apply_caps(weights, sectors)
-
-    panel = _price_panel(as_of)
-    realized = _portfolio_vol(weights, panel)
+    panel = _load_price_panel(as_of)
+    realized = _portfolio_vol(pre, panel, VOL_LOOKBACK)
     if realized > 0:
-        scale = VOL_TARGET / realized
-        scale = float(np.clip(scale, 0.2, 2.0))
-        weights = {t: w * scale for t, w in weights.items()}
+        raw_scalar = VOL_TARGET / realized
+        vol_scalar = float(np.clip(raw_scalar, *VOL_SCALAR_CLAMP))
+    else:
+        vol_scalar = 1.0
 
-    # DD overlay
-    dd = _current_dd(as_of)
-    if dd > DD_OVERLAY_TRIGGER:
-        weights = {t: w * DD_OVERLAY_FACTOR for t, w in weights.items()}
+    dd = _current_drawdown(as_of)
+    dd_factor = DD_FACTOR if dd > DD_TRIGGER else 1.0
+    scalar = vol_scalar * dd_factor
 
-    # Cap gross leverage
-    gross = sum(abs(w) for w in weights.values())
-    if gross > MAX_GROSS:
-        scale = MAX_GROSS / gross
-        weights = {t: w * scale for t, w in weights.items()}
+    print(f"  pre-overlay gross={float(pre.abs().sum()):.4f}  net={float(pre.sum()):+.4f}")
+    print(f"  realized_vol={realized:.4f}  vol_scalar={vol_scalar:.3f}  "
+          f"dd={dd:.3f}  dd_factor={dd_factor:.2f}  -> scalar={scalar:.3f}")
 
-    out = pd.DataFrame([
-        {"ticker": t, "target_weight": w, "sector": sectors.get(t)}
-        for t, w in weights.items() if abs(w) > 1e-5
-    ])
-    out["as_of"] = as_of
-    return out.sort_values("target_weight", ascending=False).reset_index(drop=True)
+    w = pre * scalar
+    w = _apply_per_name_cap(w, PER_NAME_CAP)
+    w = _apply_sector_cap(w, sectors, PER_SECTOR_CAP)
+    w = _cap_gross(w, MAX_GROSS)
+
+    # Drop ~zero weights
+    w = w[w.abs() > 1e-6]
+    if w.empty:
+        print("All weights collapsed to zero after caps.")
+        return pd.DataFrame()
+
+    target_date = _next_business_day(as_of)
+    print(f"  final: {len(w)} positions  gross={float(w.abs().sum()):.4f}  "
+          f"net={float(w.sum()):+.4f}  target_date={target_date}")
+
+    out_rows: list[tuple] = []
+    for ticker, weight in w.items():
+        out_rows.append((
+            int(sids.loc[ticker]),
+            target_date,
+            float(weight),
+            float(pre.loc[ticker]),
+            sectors.loc[ticker] if pd.notna(sectors.loc[ticker]) else None,
+        ))
+
+    n = db.bulk_upsert(
+        POSITIONS_TABLE, POSITIONS_COLS, out_rows,
+        conflict_cols=["security_id", "date"],
+    )
+    print(f"  upserted {n} rows into {POSITIONS_TABLE}")
+
+    # Return the same shape as a DataFrame for callers that want to inspect
+    out_df = pd.DataFrame(out_rows, columns=POSITIONS_COLS)
+    return out_df.sort_values("target_weight", ascending=False).reset_index(drop=True)
 
 
 if __name__ == "__main__":
-    df = construct()
-    if df.empty:
-        print("No targets produced.")
-    else:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--as-of", type=str, default=None,
+                    help="Signal date (YYYY-MM-DD); default = latest in derived.signals_daily")
+    args = ap.parse_args()
+    aod = dt.date.fromisoformat(args.as_of) if args.as_of else None
+    df = construct(as_of=aod)
+    if df is not None and not df.empty:
+        print()
         print(df.head(20).to_string(index=False))
-        print(f"\nTotal positions: {len(df)}, gross: {df['target_weight'].abs().sum():.2%}, "
-              f"net: {df['target_weight'].sum():.2%}")

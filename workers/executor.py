@@ -1,261 +1,210 @@
-"""Executor — turns target weights into simulated trades.
+"""Single-day executor — turns target weights into one NAV row.
 
-Models:
-  - Slippage: 5 bps + half-spread proxy (high-low / mid * 0.5, capped 20bps).
-  - Commission: $0.005/share, min $1.
-  - Market impact: extra slippage if size > 1% of 30-day ADV.
+Reads:
+  portfolio.positions_daily   target weights for `as_of` (and prior day for turnover)
+  raw.ohlcv_daily             closing prices for `as_of` and prior day
+  portfolio.nav_daily         previous NAV (most recent row before `as_of`)
+
+Writes:
+  portfolio.nav_daily         one upserted row for `as_of`
+
+Cost model: flat 10 bps × turnover (turnover = Σ|W[D] - W[D-1]|). No slippage,
+no commission — this is the simulation-grade drag mandated by the spec.
+
+Accounting convention:
+  positions_daily.date = D means the weights HELD DURING day D (rebalanced at
+  close of D-1). Therefore:
+    portfolio_return[D] = Σ_i W[D, i] * (P[D, i] / P[D-1, i] - 1)
+    turnover[D]         = Σ_i |W[D, i] - W[D-1, i]|
+    cost[D]             = turnover[D] * COST_BPS / 10_000
+    nav[D]              = nav[D-1] * (1 + portfolio_return[D] - cost[D])
+
+This module is idempotent: re-running for the same `as_of` recomputes and
+upserts the same row.
+
+CLI:
+  python -m workers.executor                   # latest day with positions
+  python -m workers.executor --as-of 2026-05-09
 """
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import os
 
 import pandas as pd
 
 from .lib import db
-from . import portfolio_constructor
 
 
-BASE_SLIPPAGE_BPS = 5.0
-COMMISSION_PER_SHARE = 0.005
-COMMISSION_MIN = 1.0
-ADV_IMPACT_THRESHOLD = 0.01
-ADV_IMPACT_BPS = 15.0
+# --- tunables ---------------------------------------------------------------
+
+COST_BPS = 10.0   # flat execution drag, applied to turnover
+INITIAL_NAV_ENV = "INITIAL_NAV"
+DEFAULT_INITIAL_NAV = 10_000_000.0
 
 
-def _last_price(security_id: int, as_of: dt.date) -> dict | None:
-    rows = db.query(
-        """
-        SELECT close, adj_close, high, low, volume
-        FROM prices WHERE security_id = %s AND date = %s;
-        """,
-        (security_id, as_of),
+NAV_TABLE = "portfolio.nav_daily"
+NAV_COLS = [
+    "date", "nav", "daily_return", "cumulative_return",
+    "gross_exposure", "net_exposure", "turnover", "execution_cost_bps",
+]
+
+
+# --- I/O --------------------------------------------------------------------
+
+def _prev_trading_day(as_of: dt.date) -> dt.date | None:
+    row = db.query(
+        "SELECT MAX(date) AS d FROM raw.ohlcv_daily WHERE date < %s;",
+        (as_of,),
     )
-    return rows[0] if rows else None
+    return row[0]["d"] if row and row[0]["d"] else None
 
 
-def _avg_dollar_volume(security_id: int, as_of: dt.date, days: int = 30) -> float:
-    start = as_of - dt.timedelta(days=int(days * 1.6))
+def _load_weights(as_of: dt.date) -> pd.Series:
+    """ticker → target_weight effective on as_of."""
     rows = db.query(
         """
-        SELECT close, volume FROM prices
-        WHERE security_id = %s AND date BETWEEN %s AND %s;
+        SELECT s.ticker, pd.target_weight
+        FROM portfolio.positions_daily pd
+        JOIN securities s ON s.id = pd.security_id
+        WHERE pd.date = %s;
         """,
-        (security_id, start, as_of),
+        (as_of,),
     )
     if not rows:
-        return 0.0
+        return pd.Series(dtype=float)
     df = pd.DataFrame(rows)
-    df["close"] = pd.to_numeric(df["close"])
-    df["volume"] = pd.to_numeric(df["volume"])
-    return float((df["close"] * df["volume"]).tail(days).mean())
+    return pd.to_numeric(df["target_weight"]).set_axis(df["ticker"]).astype(float)
 
 
-def _ticker_to_id() -> dict[str, int]:
-    return {r["ticker"]: r["id"] for r in db.query("SELECT id, ticker FROM securities;")}
-
-
-def _current_positions(as_of: dt.date) -> dict[int, dict]:
+def _load_prev_weights(as_of: dt.date) -> pd.Series:
+    """Most recent positions_daily row strictly before as_of."""
     rows = db.query(
         """
-        SELECT security_id, quantity, avg_cost, peak_price
-        FROM positions WHERE as_of = (
-          SELECT MAX(as_of) FROM positions WHERE as_of <= %s
+        SELECT s.ticker, pd.target_weight
+        FROM portfolio.positions_daily pd
+        JOIN securities s ON s.id = pd.security_id
+        WHERE pd.date = (
+          SELECT MAX(date) FROM portfolio.positions_daily WHERE date < %s
         );
         """,
         (as_of,),
     )
-    return {r["security_id"]: r for r in rows}
+    if not rows:
+        return pd.Series(dtype=float)
+    df = pd.DataFrame(rows)
+    return pd.to_numeric(df["target_weight"]).set_axis(df["ticker"]).astype(float)
 
 
-def _nav_and_cash(as_of: dt.date) -> tuple[float, float]:
+def _load_prices(as_of: dt.date) -> pd.Series:
     rows = db.query(
-        "SELECT nav, cash FROM portfolio_nav WHERE date <= %s ORDER BY date DESC LIMIT 1;",
+        """
+        SELECT s.ticker, o.adj_close
+        FROM raw.ohlcv_daily o
+        JOIN securities s ON s.id = o.security_id
+        WHERE o.date = %s;
+        """,
+        (as_of,),
+    )
+    if not rows:
+        return pd.Series(dtype=float)
+    df = pd.DataFrame(rows)
+    return pd.to_numeric(df["adj_close"]).set_axis(df["ticker"]).astype(float)
+
+
+def _prev_nav(as_of: dt.date) -> tuple[float, float]:
+    """Returns (prev_nav, initial_nav)."""
+    initial = float(os.environ.get(INITIAL_NAV_ENV, DEFAULT_INITIAL_NAV))
+    rows = db.query(
+        "SELECT nav FROM portfolio.nav_daily WHERE date < %s ORDER BY date DESC LIMIT 1;",
         (as_of,),
     )
     if rows:
-        return float(rows[0]["nav"]), float(rows[0]["cash"])
-    initial = float(os.environ.get("INITIAL_NAV", "10000000"))
+        return float(rows[0]["nav"]), initial
     return initial, initial
 
 
-def _strategy_id_for(ticker: str, as_of: dt.date) -> int | None:
-    rows = db.query(
-        """
-        SELECT strategy_id, ABS(signal) AS s FROM signals sg
-        JOIN securities sec ON sec.id = sg.security_id
-        WHERE sec.ticker = %s AND sg.date = %s
-        ORDER BY s DESC LIMIT 1;
-        """,
-        (ticker, as_of),
-    )
-    return rows[0]["strategy_id"] if rows else None
+# --- main -------------------------------------------------------------------
 
-
-def _slippage_bps(price: float, high: float, low: float, qty: float, adv_dollars: float) -> float:
-    if not price or price <= 0:
-        return BASE_SLIPPAGE_BPS
-    half_spread = max((high - low) / price * 0.5 * 10_000, 0) if high and low else 0
-    half_spread = min(half_spread, 20.0)
-    impact = 0.0
-    notional = abs(qty) * price
-    if adv_dollars > 0 and notional / adv_dollars > ADV_IMPACT_THRESHOLD:
-        impact = ADV_IMPACT_BPS
-    return BASE_SLIPPAGE_BPS + half_spread + impact
-
-
-INSERT_TRADE = """
-INSERT INTO trades
-  (security_id, strategy_id, side, quantity, price, slippage_bps, commission, notional, executed_at, reason)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-"""
-
-UPSERT_POSITION = """
-INSERT INTO positions
-  (security_id, quantity, avg_cost, market_value, weight, unrealized_pnl, peak_price, as_of)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-ON CONFLICT (security_id, as_of) DO UPDATE SET
-  quantity = EXCLUDED.quantity,
-  avg_cost = EXCLUDED.avg_cost,
-  market_value = EXCLUDED.market_value,
-  weight = EXCLUDED.weight,
-  unrealized_pnl = EXCLUDED.unrealized_pnl,
-  peak_price = EXCLUDED.peak_price;
-"""
-
-
-def execute(as_of: dt.date | None = None) -> int:
+def execute(as_of: dt.date | None = None) -> dict:
     if as_of is None:
-        rows = db.query("SELECT MAX(date) AS d FROM prices;")
-        as_of = rows[0]["d"]
+        row = db.query("SELECT MAX(date) AS d FROM portfolio.positions_daily;")
+        as_of = row[0]["d"] if row else None
         if as_of is None:
-            return 0
+            print("No positions in portfolio.positions_daily — nothing to execute.")
+            return {}
 
-    targets = portfolio_constructor.construct(as_of)
-    if targets.empty:
-        return 0
+    prev = _prev_trading_day(as_of)
+    if prev is None:
+        print(f"No prior trading day before {as_of}; treating as t=0.")
+    w_today = _load_weights(as_of)
+    if w_today.empty:
+        print(f"No target weights for {as_of}.")
+        return {}
 
-    nav, cash = _nav_and_cash(as_of)
-    tid = _ticker_to_id()
-    current = _current_positions(as_of)
-    target_by_id: dict[int, float] = {tid[t]: w for t, w in zip(targets["ticker"], targets["target_weight"]) if t in tid}
+    w_prev = _load_prev_weights(as_of)
+    p_today = _load_prices(as_of)
+    p_prev = _load_prices(prev) if prev else pd.Series(dtype=float)
 
-    trades = 0
-    new_positions: dict[int, dict] = {}
+    # Vectorized realized return: only tickers present on both days contribute
+    if not p_prev.empty:
+        common = w_today.index.intersection(p_today.index).intersection(p_prev.index)
+        rets = (p_today.loc[common] / p_prev.loc[common] - 1.0).replace(
+            [float("inf"), float("-inf")], 0.0
+        ).fillna(0.0)
+        portfolio_ret = float((w_today.loc[common] * rets).sum())
+    else:
+        portfolio_ret = 0.0
 
-    # Sells / closes for names not in target
-    for sec_id, pos in current.items():
-        if sec_id not in target_by_id and float(pos["quantity"]) != 0:
-            target_by_id[sec_id] = 0.0  # close
-
-    for sec_id, target_weight in target_by_id.items():
-        ticker_row = db.query("SELECT ticker FROM securities WHERE id = %s;", (sec_id,))
-        if not ticker_row:
-            continue
-        ticker = ticker_row[0]["ticker"]
-        prc = _last_price(sec_id, as_of)
-        if not prc or not prc["close"]:
-            continue
-        price = float(prc["close"])
-        target_dollars = target_weight * nav
-        target_qty = round(target_dollars / price, 4) if price > 0 else 0
-        cur_qty = float(current.get(sec_id, {}).get("quantity", 0))
-        delta = target_qty - cur_qty
-        if abs(delta) * price < 1000:  # skip dust trades < $1k
-            if cur_qty != 0:
-                avg_cost = float(current.get(sec_id, {}).get("avg_cost", price))
-                peak = max(float(current.get(sec_id, {}).get("peak_price") or price), price)
-                new_positions[sec_id] = {
-                    "qty": cur_qty,
-                    "avg_cost": avg_cost,
-                    "price": price,
-                    "peak_price": peak,
-                }
-            continue
-
-        side = "BUY" if delta > 0 else "SELL"
-        adv = _avg_dollar_volume(sec_id, as_of)
-        slip_bps = _slippage_bps(
-            price,
-            float(prc["high"] or price), float(prc["low"] or price),
-            delta, adv,
-        )
-        slip_factor = 1 + (slip_bps / 10_000) * (1 if side == "BUY" else -1)
-        fill_price = round(price * slip_factor, 4)
-        commission = max(abs(delta) * COMMISSION_PER_SHARE, COMMISSION_MIN)
-        notional = round(abs(delta) * fill_price, 2)
-
-        strat = _strategy_id_for(ticker, as_of)
-        db.execute(
-            INSERT_TRADE,
-            (
-                sec_id, strat, side, abs(round(delta, 4)), fill_price,
-                round(slip_bps, 2), round(commission, 2), notional,
-                dt.datetime.combine(as_of, dt.time(16, 0)),
-                f"target={target_weight:.4f}",
-            ),
-        )
-        trades += 1
-
-        # update cash
-        if side == "BUY":
-            cash -= notional + commission
-        else:
-            cash += notional - commission
-
-        new_qty = cur_qty + delta
-        if cur_qty != 0 and ((cur_qty > 0) == (new_qty > 0)) and side == "BUY":
-            old_cost = float(current.get(sec_id, {}).get("avg_cost", fill_price)) * cur_qty
-            new_avg = (old_cost + delta * fill_price) / new_qty if new_qty != 0 else fill_price
-        elif cur_qty == 0 or (cur_qty > 0) != (new_qty > 0):
-            new_avg = fill_price
-        else:
-            new_avg = float(current.get(sec_id, {}).get("avg_cost", fill_price))
-
-        if abs(new_qty) > 1e-6:
-            peak = max(float(current.get(sec_id, {}).get("peak_price") or fill_price), fill_price)
-            new_positions[sec_id] = {
-                "qty": new_qty,
-                "avg_cost": new_avg,
-                "price": price,
-                "peak_price": peak,
-            }
-
-    # Write today's position snapshot (only for non-zero)
-    for sec_id, p in new_positions.items():
-        mv = p["qty"] * p["price"]
-        weight = mv / nav if nav else 0
-        unrealized = (p["price"] - p["avg_cost"]) * p["qty"]
-        db.execute(UPSERT_POSITION, (
-            sec_id, p["qty"], p["avg_cost"], round(mv, 2),
-            round(weight, 6), round(unrealized, 2),
-            p["peak_price"], as_of,
-        ))
-
-    # Update portfolio_nav
-    gross = sum(abs(p["qty"] * p["price"]) for p in new_positions.values())
-    net = sum(p["qty"] * p["price"] for p in new_positions.values())
-    new_nav = cash + net
-    db.execute(
-        """
-        INSERT INTO portfolio_nav (date, nav, cash, gross_exposure, net_exposure, leverage)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        ON CONFLICT (date) DO UPDATE SET
-          nav = EXCLUDED.nav, cash = EXCLUDED.cash,
-          gross_exposure = EXCLUDED.gross_exposure,
-          net_exposure = EXCLUDED.net_exposure,
-          leverage = EXCLUDED.leverage;
-        """,
-        (
-            as_of, round(new_nav, 2), round(cash, 2),
-            round(gross, 2), round(net, 2),
-            round(gross / new_nav, 4) if new_nav else 0,
-        ),
+    # Turnover = Σ|W[D] - W[D-1]| over union of holdings
+    universe = w_today.index.union(w_prev.index)
+    turnover = float(
+        (w_today.reindex(universe).fillna(0.0) - w_prev.reindex(universe).fillna(0.0))
+        .abs()
+        .sum()
     )
 
-    print(f"[{as_of}] {trades} trades, NAV ${new_nav:,.0f}, gross {gross/new_nav*100:.0f}%")
-    return trades
+    cost = turnover * COST_BPS / 10_000.0
+    net_return = portfolio_ret - cost
+
+    prev_nav_val, initial_nav = _prev_nav(as_of)
+    new_nav = prev_nav_val * (1.0 + net_return)
+    cumret = new_nav / initial_nav - 1.0
+
+    gross = float(w_today.abs().sum())
+    net = float(w_today.sum())
+
+    row = (
+        as_of,
+        round(new_nav, 4),
+        round(net_return, 8),
+        round(cumret, 8),
+        round(gross, 6),
+        round(net, 6),
+        round(turnover, 6),
+        COST_BPS,
+    )
+    db.bulk_upsert(NAV_TABLE, NAV_COLS, [row], conflict_cols=["date"])
+
+    print(
+        f"[{as_of}] gross_ret={portfolio_ret:+.4%}  turnover={turnover:.3f}  "
+        f"cost={cost:.4%}  net_ret={net_return:+.4%}  "
+        f"NAV=${new_nav:,.0f}  cum={cumret:+.2%}"
+    )
+    return {
+        "date": as_of,
+        "nav": new_nav,
+        "daily_return": net_return,
+        "turnover": turnover,
+        "gross_exposure": gross,
+        "net_exposure": net,
+    }
 
 
 if __name__ == "__main__":
-    execute()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--as-of", type=str, default=None, help="YYYY-MM-DD")
+    args = ap.parse_args()
+    aod = dt.date.fromisoformat(args.as_of) if args.as_of else None
+    execute(as_of=aod)

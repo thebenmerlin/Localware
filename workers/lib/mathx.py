@@ -135,3 +135,36 @@ def zscore(s: pd.Series) -> pd.Series:
 def winsorize(s: pd.Series, lo: float = 0.01, hi: float = 0.99) -> pd.Series:
     qlo, qhi = s.quantile(lo), s.quantile(hi)
     return s.clip(lower=qlo, upper=qhi)
+
+
+# ---------------------------------------------------------------------------
+# Panel-level vectorized helpers (operate column-wise on a DataFrame)
+# ---------------------------------------------------------------------------
+
+def panel_realized_vol(panel: pd.DataFrame, window: int = 60,
+                       annualize: bool = True, min_periods: int | None = None) -> pd.DataFrame:
+    """Rolling realized vol per column. Returns a panel of the same shape."""
+    if min_periods is None:
+        min_periods = max(20, window // 2)
+    rets = panel.pct_change()
+    vol = rets.rolling(window, min_periods=min_periods).std()
+    if annualize:
+        vol = vol * np.sqrt(TRADING_DAYS)
+    return vol
+
+
+def cross_sectional_rank(s: pd.Series, ascending: bool = True) -> pd.Series:
+    """Cross-sectional rank in [0, 1]. NaN inputs stay NaN."""
+    return s.rank(pct=True, ascending=ascending)
+
+
+def rolling_max_drawdown(equity: pd.Series, window: int = TRADING_DAYS,
+                         min_periods: int = 20) -> pd.Series:
+    """Rolling max drawdown (negative number) over a window."""
+    def _mdd(arr):
+        peak = np.maximum.accumulate(arr)
+        # peak is always > 0 for an equity series; guard divide anyway
+        with np.errstate(divide="ignore", invalid="ignore"):
+            dd = (arr - peak) / peak
+        return float(np.nanmin(dd))
+    return equity.rolling(window, min_periods=min_periods).apply(_mdd, raw=True)
