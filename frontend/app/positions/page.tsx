@@ -60,7 +60,7 @@ export default async function Page() {
           xKey="sector"
           yKey="weight"
           height={260}
-          yFmt={(v) => pct(v, 1)}
+          yFmt="pct1"
           signed
         />
       </Figure>

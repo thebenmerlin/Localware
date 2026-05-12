@@ -29,7 +29,7 @@ export function AcademicBar({
           tick={{ fill: t.muted, fontSize: 11 }}
         />
         <YAxis
-          tickFormatter={yFmt}
+          tickFormatter={(v) => formatY(v as number, yFmt)}
           tickLine={false}
           axisLine={{ stroke: t.ink, strokeWidth: 0.5 }}
           width={56}
@@ -46,11 +46,20 @@ export function AcademicBar({
           }}
           itemStyle={{ color: t.ink }}
           labelStyle={{ color: t.ink }}
-          formatter={(v: number) => (yFmt ? yFmt(v) : v)}
+          formatter={(v: number) => formatY(v, yFmt)}
         />
         <Bar dataKey={yKey} isAnimationActive={false}>
           {data.map((d, i) => {
             const v = Number(d[yKey]) || 0;
+            const color = signed ? (v >= 0 ? t.positive : t.negative) : t.academic;
+            return <Cell key={i} fill={color} />;
+          })}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+ Number(d[yKey]) || 0;
             const color = signed ? (v >= 0 ? t.positive : t.negative) : t.academic;
             return <Cell key={i} fill={color} />;
           })}

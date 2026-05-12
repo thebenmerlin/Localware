@@ -109,8 +109,8 @@ export default async function Page() {
           xKey="date"
           yKeys={[{ key: "nav", color: "academic" }]}
           height={300}
-          yFmt={(v) => money(v)}
-          xFmt={(d) => String(d).slice(0, 7)}
+          yFmt="money"
+          xFmt="YYYY-MM"
         />
       </Figure>
 
@@ -132,8 +132,8 @@ export default async function Page() {
           height={220}
           fill
           refY={-0.08}
-          yFmt={(v) => pct(v, 1)}
-          xFmt={(d) => String(d).slice(0, 7)}
+          yFmt="pct1"
+          xFmt="YYYY-MM"
         />
       </Figure>
 
@@ -148,8 +148,8 @@ export default async function Page() {
           yKeys={[{ key: "sharpe", color: "ink" }]}
           height={200}
           refY={0}
-          yFmt={(v) => num(v, 2)}
-          xFmt={(d) => String(d).slice(0, 7)}
+          yFmt="num2"
+          xFmt="YYYY-MM"
         />
       </Figure>
 

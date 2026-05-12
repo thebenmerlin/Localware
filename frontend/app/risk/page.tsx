@@ -89,8 +89,8 @@ export default async function Page() {
             { key: "vol", label: "Realised vol (ann.)", color: "academic", dash: "3 3" },
           ]}
           height={240}
-          yFmt={(v) => pct(v, 2)}
-          xFmt={(d) => String(d).slice(0, 7)}
+          yFmt="pct2"
+          xFmt="YYYY-MM"
         />
       </Figure>
 

@@ -99,8 +99,8 @@ export default async function Page() {
           yKeys={[{ key: "nav", color: "academic", label: "NAV" }]}
           height={300}
           fill
-          yFmt={(v) => money(v)}
-          xFmt={(d) => String(d).slice(0, 7)}
+          yFmt="money"
+          xFmt="YYYY-MM"
         />
       </Figure>
 
@@ -204,5 +204,8 @@ export default async function Page() {
 
       <div className="ornament"></div>
     </div>
+  );
+}
+iv>
   );
 }

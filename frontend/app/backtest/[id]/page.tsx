@@ -74,8 +74,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           yKeys={[{ key: "nav", color: "academic" }]}
           height={300}
           fill
-          yFmt={(v) => money(v)}
-          xFmt={(d) => String(d).slice(0, 7)}
+          yFmt="money"
+          xFmt="YYYY-MM"
         />
       </Figure>
 

@@ -5,9 +5,23 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { useThemeColors } from "@/lib/useThemeColors";
+import { pct, num, money } from "@/lib/format";
 
 type Pt = Record<string, number | string | null>;
 type YKey = { key: string; label?: string; color?: keyof Pick<ReturnType<typeof useThemeColors>, "academic"|"crimson"|"ink"|"positive"|"negative"|"muted">; dash?: string };
+
+function formatY(v: number, fmt?: string) {
+  if (fmt === "money") return money(v);
+  if (fmt === "num2") return num(v, 2);
+  if (fmt === "pct1") return pct(v, 1);
+  if (fmt === "pct2") return pct(v, 2);
+  return v.toString();
+}
+
+function formatX(v: string, fmt?: string) {
+  if (fmt === "YYYY-MM") return String(v).slice(0, 7);
+  return v;
+}
 
 export function AcademicLine({
   data, xKey, yKeys, height = 240, yFmt, xFmt, fill, refY,
@@ -16,8 +30,8 @@ export function AcademicLine({
   xKey: string;
   yKeys: YKey[];
   height?: number;
-  yFmt?: (v: number) => string;
-  xFmt?: (v: string) => string;
+  yFmt?: string;
+  xFmt?: string;
   fill?: boolean;
   refY?: number;
 }) {
