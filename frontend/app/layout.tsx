@@ -23,7 +23,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <h1 className="text-[1.05rem] !mt-0 !mb-0 font-display font-semibold tracking-tight">
                 Localware
               </h1>
-              <span className="smallcaps !text-[0.65rem]">est. 2026 · multi-factor</span>
             </div>
             <Nav />
             <div className="ml-auto">
