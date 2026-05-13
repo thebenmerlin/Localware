@@ -19,7 +19,7 @@ const links = [
 export function Nav() {
   const path = usePathname();
   return (
-    <nav className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
+    <nav className="flex flex-1 flex-wrap items-baseline justify-center gap-x-5 gap-y-1">
       {links.map((l) => {
         const active = path === l.href || (l.href !== "/" && path.startsWith(l.href));
         return (

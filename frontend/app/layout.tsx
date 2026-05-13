@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Nav } from "@/components/Nav";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ThemeScript } from "@/components/ThemeScript";
+import { MarketClock } from "@/components/MarketClock";
 
 export const metadata: Metadata = {
   title: "Localware — Quantitative Multi-Factor Fund",
@@ -36,7 +37,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main className="max-w-wide mx-auto px-6 py-8">{children}</main>
         <footer className="border-t border-rule mt-16">
           <div className="max-w-wide mx-auto px-6 py-6 text-tiny text-muted flex flex-wrap gap-x-6 gap-y-1 items-baseline">
-            <span className="smallcaps">colophon</span>
+            <MarketClock />
             <span className="ml-auto italic">All figures simulated against historical prices.</span>
           </div>
         </footer>
