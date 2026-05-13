@@ -34,13 +34,13 @@ export async function getLatestNav() {
     SELECT
       date,
       nav::float                                 AS nav,
-      cash::float                                AS cash,
+      (nav * (1 - net_exposure))::float          AS cash,
       gross_exposure::float                      AS gross_exposure,
       net_exposure::float                        AS net_exposure,
       gross_exposure::float                      AS leverage,
       daily_return::float                        AS daily_return,
       cumulative_return::float                   AS cumulative_return
-    FROM portfolio_nav
+    FROM portfolio.nav_daily
     ORDER BY date DESC
     LIMIT 1;
   `;
@@ -56,7 +56,7 @@ export async function getEquityCurve() {
       nav::float               AS nav,
       daily_return::float      AS daily_return,
       cumulative_return::float AS cumulative_return
-    FROM portfolio_nav
+    FROM analytics.equity_curve
     ORDER BY date;
   `;
 }
@@ -79,7 +79,7 @@ export async function getMetrics(period: Period = "all") {
       hit_rate::float     AS hit_rate,
       beta::float         AS beta,
       alpha::float        AS alpha
-    FROM performance_metrics
+    FROM analytics.performance_summary
     WHERE period = ${period}
     LIMIT 1;
   `;
@@ -100,7 +100,7 @@ export async function getAllMetrics() {
       hit_rate::float     AS hit_rate,
       beta::float         AS beta,
       alpha::float        AS alpha
-    FROM performance_metrics
+    FROM analytics.performance_summary
     ORDER BY CASE period
       WHEN 'all' THEN 0 WHEN 'ytd' THEN 1 WHEN '1y' THEN 2
       WHEN '3m'  THEN 3 WHEN '1m'  THEN 4 ELSE 5
@@ -131,7 +131,7 @@ export async function getCurrentPositions() {
       SELECT MAX(date) AS d FROM portfolio.positions_daily
     ),
     latest_nav AS (
-      SELECT nav::float AS nav FROM portfolio_nav ORDER BY date DESC LIMIT 1
+      SELECT nav::float AS nav FROM portfolio.nav_daily ORDER BY date DESC LIMIT 1
     ),
     latest_px AS (
       SELECT DISTINCT ON (security_id)
@@ -161,17 +161,15 @@ export async function getCurrentPositions() {
 export async function getSectorExposure() {
   return sql<{ sector: string; weight: number; count: number }[]>`
     WITH latest_date AS (
-      SELECT MAX(as_of) AS d FROM positions
+      SELECT MAX(date) AS d FROM portfolio.positions_daily
     )
     SELECT
-      COALESCE(s.sector, '-') AS sector,
-      SUM(pd.weight)::float AS weight,
+      COALESCE(pd.sector, '-') AS sector,
+      SUM(pd.target_weight)::float AS weight,
       COUNT(*)::int AS count
-    FROM positions pd
-    JOIN latest_date ld ON pd.as_of = ld.d
-    JOIN securities s ON s.id = pd.security_id
-    WHERE pd.quantity != 0
-    GROUP BY s.sector
+    FROM portfolio.positions_daily pd
+    JOIN latest_date ld ON pd.date = ld.d
+    GROUP BY pd.sector
     ORDER BY weight DESC;
   `;
 }
@@ -181,6 +179,9 @@ export async function getSectorExposure() {
 // ---------------------------------------------------------------------------
 
 export async function getRecentTrades(limit = 50) {
+  // No trades table exists in the new schema. Each row here represents an
+  // implied rebalance: the per-name target_weight change at a given date,
+  // scaled to dollar notional by that day's NAV.
   return sql<
     {
       ticker: string;
@@ -195,21 +196,36 @@ export async function getRecentTrades(limit = 50) {
       reason: string | null;
     }[]
   >`
+    WITH diffs AS (
+      SELECT
+        pd.security_id,
+        pd.date,
+        pd.target_weight::float AS target_weight,
+        LAG(pd.target_weight) OVER (PARTITION BY pd.security_id ORDER BY pd.date)::float
+          AS prev_weight
+      FROM portfolio.positions_daily pd
+    )
     SELECT
       s.ticker,
-      t.side,
-      t.quantity::float      AS quantity,
-      t.price::float         AS price,
-      t.slippage_bps::float  AS slippage_bps,
-      t.commission::float    AS commission,
-      t.notional::float      AS notional,
-      t.executed_at::text,
-      st.name                AS strategy,
-      t.reason
-    FROM trades t
-    JOIN securities s ON s.id = t.security_id
-    LEFT JOIN strategies st ON st.id = t.strategy_id
-    ORDER BY t.executed_at DESC
+      CASE WHEN (d.target_weight - COALESCE(d.prev_weight, 0)) > 0
+        THEN 'BUY' ELSE 'SELL' END                                       AS side,
+      ABS((d.target_weight - COALESCE(d.prev_weight, 0))
+          * COALESCE(n.nav, 0) / NULLIF(o.adj_close, 0))::float          AS quantity,
+      COALESCE(o.adj_close, 0)::float                                    AS price,
+      0::float                                                           AS slippage_bps,
+      0::float                                                           AS commission,
+      ABS((d.target_weight - COALESCE(d.prev_weight, 0))
+          * COALESCE(n.nav, 0))::float                                   AS notional,
+      ((d.date::timestamp) + INTERVAL '16 hours')::text                  AS executed_at,
+      NULL::text                                                         AS strategy,
+      ('weight ' || ROUND(COALESCE(d.prev_weight, 0)::numeric, 4)
+                 || ' → ' || ROUND(d.target_weight::numeric, 4))         AS reason
+    FROM diffs d
+    JOIN securities s                ON s.id = d.security_id
+    LEFT JOIN raw.ohlcv_daily o      ON o.security_id = d.security_id AND o.date = d.date
+    LEFT JOIN portfolio.nav_daily n  ON n.date = d.date
+    WHERE (d.target_weight - COALESCE(d.prev_weight, 0)) <> 0
+    ORDER BY d.date DESC, ABS(d.target_weight - COALESCE(d.prev_weight, 0)) DESC
     LIMIT ${limit};
   `;
 }
@@ -239,23 +255,35 @@ export async function getStrategies() {
 }
 
 export async function getStrategySignals(strategyId: number, limit = 50) {
+  // The sleeve name lives on `strategies`; the sleeve's per-name contribution
+  // lives in `derived.signals_daily.attribution` (JSONB keyed by sleeve name).
+  const stratRows = await sql<{ name: string }[]>`
+    SELECT name FROM strategies WHERE id = ${strategyId} LIMIT 1;
+  `;
+  if (!stratRows[0]) return [];
+  const name = stratRows[0].name;
+
   return sql<{ ticker: string; signal: number; score: number; date: string }[]>`
     SELECT
       s.ticker,
-      sd.signal::float AS signal,
-      sd.score::float  AS score,
+      (sd.attribution->>${name})::float AS signal,
+      sd.blended_signal::float          AS score,
       sd.date
-    FROM signals sd
+    FROM derived.signals_daily sd
     JOIN securities s ON s.id = sd.security_id
-    WHERE sd.strategy_id = ${strategyId}
-      AND sd.date = (SELECT MAX(date) FROM signals WHERE strategy_id = ${strategyId})
-      AND sd.signal <> 0
-    ORDER BY ABS(sd.signal) DESC
+    WHERE sd.date = (SELECT MAX(date) FROM derived.signals_daily)
+      AND sd.attribution ? ${name}
+      AND (sd.attribution->>${name})::float <> 0
+    ORDER BY ABS((sd.attribution->>${name})::float) DESC
     LIMIT ${limit};
   `;
 }
 
 export async function getStrategyContribution() {
+  // Synthesized: per-sleeve dollar exposure on the latest signal date, plus
+  // the count of names that sleeve is currently picking. `net_flow` is now
+  // "current dollar contribution" rather than historical cash flow, but the
+  // sign/magnitude story is the same.
   return sql<
     {
       strategy: string;
@@ -264,18 +292,29 @@ export async function getStrategyContribution() {
       trade_count: number;
     }[]
   >`
-    WITH trade_counts AS (
-      SELECT strategy_id, COUNT(*) AS count
-      FROM trades
-      GROUP BY strategy_id
+    WITH latest AS (
+      SELECT MAX(date) AS d FROM derived.signals_daily
+    ),
+    latest_nav AS (
+      SELECT nav::float AS nav FROM portfolio.nav_daily ORDER BY date DESC LIMIT 1
+    ),
+    contribs AS (
+      SELECT
+        kv.key                    AS strategy,
+        SUM((kv.value)::float)    AS net_signal,
+        COUNT(*) FILTER (WHERE (kv.value)::float <> 0) AS active_names
+      FROM derived.signals_daily sd
+      CROSS JOIN LATERAL jsonb_each_text(sd.attribution) AS kv(key, value)
+      WHERE sd.date = (SELECT d FROM latest)
+      GROUP BY kv.key
     )
     SELECT
       st.name                                              AS strategy,
       st.allocation_weight::float                          AS allocation_weight,
-      0::float                                             AS net_flow,
-      COALESCE(tc.count, 0)::int                           AS trade_count
+      COALESCE(c.net_signal * (SELECT nav FROM latest_nav), 0)::float AS net_flow,
+      COALESCE(c.active_names, 0)::int                     AS trade_count
     FROM strategies st
-    LEFT JOIN trade_counts tc ON tc.strategy_id = st.id
+    LEFT JOIN contribs c ON c.strategy = st.name
     ORDER BY st.allocation_weight DESC;
   `;
 }
@@ -304,7 +343,7 @@ export async function getRiskLatest() {
       expected_shortfall::float AS expected_shortfall,
       realized_vol::float       AS realized_vol,
       '{}'::jsonb               AS factor_exposures
-    FROM risk_metrics
+    FROM analytics.var_daily
     WHERE var_95 IS NOT NULL
     ORDER BY date DESC
     LIMIT 1;
@@ -318,9 +357,9 @@ export async function getRiskHistory(days = 252) {
       date,
       var_95::float       AS var_95,
       realized_vol::float AS realized_vol
-    FROM risk_metrics
+    FROM analytics.var_daily
     WHERE var_95 IS NOT NULL
-      AND date >= (SELECT MAX(date) FROM risk_metrics) - (${days}::int * INTERVAL '1 day')
+      AND date >= (SELECT MAX(date) FROM analytics.var_daily) - (${days}::int * INTERVAL '1 day')
     ORDER BY date;
   `;
 }
@@ -332,11 +371,10 @@ export async function getRiskHistory(days = 252) {
 export async function getMonthlyReturns() {
   return sql<{ year: number; month: number; ret: number }[]>`
     SELECT
-      EXTRACT(YEAR FROM date)::int AS year,
-      EXTRACT(MONTH FROM date)::int AS month,
-      (EXP(SUM(LN(1 + COALESCE(daily_return, 0)))) - 1)::float AS ret
-    FROM portfolio_nav
-    GROUP BY EXTRACT(YEAR FROM date), EXTRACT(MONTH FROM date)
+      year,
+      month,
+      total_return::float AS ret
+    FROM analytics.monthly_returns
     ORDER BY year, month;
   `;
 }
@@ -346,9 +384,9 @@ export async function getDrawdownSeries() {
     SELECT
       date,
       nav::float       AS nav,
-      MAX(nav) OVER (ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)::float AS peak,
-      ((nav / NULLIF(MAX(nav) OVER (ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), 0)) - 1)::float AS drawdown
-    FROM portfolio_nav
+      peak_nav::float  AS peak,
+      drawdown::float  AS drawdown
+    FROM analytics.equity_curve
     ORDER BY date;
   `;
 }
@@ -364,7 +402,7 @@ export async function getRollingSharpe(window = 63) {
       (AVG(daily_return) OVER w
         / NULLIF(STDDEV_SAMP(daily_return) OVER w, 0)
         * SQRT(252))::float AS sharpe
-    FROM portfolio_nav
+    FROM analytics.equity_curve
     WHERE daily_return IS NOT NULL
     WINDOW w AS (
       ORDER BY date
