@@ -51,7 +51,7 @@ export default function Page() {
         Following Jegadeesh and Titman (1993) and Asness, Moskowitz, and Pedersen (2013), we rank
         the universe each rebalance by 12-month price return skipping the most recent month:
       </p>
-      <Equation tex="r^{12,1}_{i,t} = \\frac{P_{i,t-21}}{P_{i,t-252}} - 1" number="1" />
+      <Equation tex={"r^{12,1}_{i,t} = \\frac{P_{i,t-21}}{P_{i,t-252}} - 1"} number="1" />
       <p>
         The portfolio holds the top-decile names long and the bottom-decile short, equal weighted
         within each leg, capped at 30 names per leg. Skipping the most-recent month removes the
@@ -63,12 +63,12 @@ export default function Page() {
         Quality combines profitability, leverage, and growth into a composite z-score:
       </p>
       <Equation
-        tex="Q_i = z(\\mathrm{ROE}_i) - z(\\mathrm{D/E}_i) + z(\\mathrm{EarningsGrowth}_i)"
+        tex={"Q_i = z(\\mathrm{ROE}_i) - z(\\mathrm{D/E}_i) + z(\\mathrm{EarningsGrowth}_i)"}
         number="2"
       />
       <p>
-        Names with <InlineEq tex="\\mathrm{ROE} \\ge 15\\%" />,{" "}
-        <InlineEq tex="\\mathrm{D/E} \\le 1.0" /> and positive year-on-year earnings growth are
+        Names with <InlineEq tex={"\\mathrm{ROE} \\ge 15\\%"} />,{" "}
+        <InlineEq tex={"\\mathrm{D/E} \\le 1.0"} /> and positive year-on-year earnings growth are
         eligible; the top 30 by composite score are held long with equal weight.
       </p>
 
@@ -77,7 +77,7 @@ export default function Page() {
         We compute realised 60-day daily volatility,
       </p>
       <Equation
-        tex="\\hat\\sigma^{60}_{i,t} = \\sqrt{\\frac{1}{59}\\sum_{s=t-59}^{t}(r_{i,s}-\\bar r_i)^2}"
+        tex={"\\hat\\sigma^{60}_{i,t} = \\sqrt{\\frac{1}{59}\\sum_{s=t-59}^{t}(r_{i,s}-\\bar r_i)^2}"}
         number="3"
       />
       <p>
@@ -105,9 +105,9 @@ export default function Page() {
         <li>
           Volatility target: scale the gross weight vector so the ex-ante portfolio volatility
           equals 12%. With sample covariance{" "}
-          <InlineEq tex="\\hat\\Sigma" /> on the trailing 60 days,
+          <InlineEq tex={"\\hat\\Sigma"} /> on the trailing 60 days,
           <Equation
-            tex="\\hat\\sigma_p^{2} = w^{\\top}\\hat\\Sigma\\, w \\cdot 252,\\qquad w \\leftarrow w \\cdot \\frac{0.12}{\\hat\\sigma_p}"
+            tex={"\\hat\\sigma_p^{2} = w^{\\top}\\hat\\Sigma\\, w \\cdot 252,\\qquad w \\leftarrow w \\cdot \\frac{0.12}{\\hat\\sigma_p}"}
             number="4"
           />
         </li>
@@ -123,14 +123,14 @@ export default function Page() {
         The simulator fills orders at the close-of-day adjusted price plus a slippage charge of
       </p>
       <Equation
-        tex="\\mathrm{slip}_{\\mathrm{bps}} = 5 + \\min\\!\\left(\\frac{H-L}{P} \\cdot 5000,\\, 20\\right) + \\mathbb{1}\\!\\left(\\frac{|q|P}{\\mathrm{ADV}_{30}} > 1\\%\\right) \\cdot 15"
+        tex={"\\mathrm{slip}_{\\mathrm{bps}} = 5 + \\min\\!\\left(\\frac{H-L}{P} \\cdot 5000,\\, 20\\right) + \\mathbb{1}\\!\\left(\\frac{|q|P}{\\mathrm{ADV}_{30}} > 1\\%\\right) \\cdot 15"}
         number="5"
       />
       <p>
         where the first term is a fixed half-spread proxy, the second adds a high-low spread
         component capped at 20 bps, and the third applies a 15 bps impact penalty when the order
         size exceeds 1% of trailing 30-day average dollar volume. Commissions are{" "}
-        <InlineEq tex="\\$0.005" /> per share with a one-dollar minimum.
+        <InlineEq tex={"\\$0.005"} /> per share with a one-dollar minimum.
       </p>
 
       <h2>5. Risk model</h2>
@@ -138,7 +138,7 @@ export default function Page() {
         The 1-day historical Value-at-Risk and Expected Shortfall are
       </p>
       <Equation
-        tex="\\widehat{\\mathrm{VaR}}_\\alpha = \\mathrm{Quantile}_\\alpha(\\{r_t\\}),\\qquad \\widehat{\\mathrm{ES}}_\\alpha = \\mathbb{E}\\!\\left[r_t\\,|\\,r_t \\le \\widehat{\\mathrm{VaR}}_\\alpha\\right]"
+        tex={"\\widehat{\\mathrm{VaR}}_\\alpha = \\mathrm{Quantile}_\\alpha(\\{r_t\\}),\\qquad \\widehat{\\mathrm{ES}}_\\alpha = \\mathbb{E}\\!\\left[r_t\\,|\\,r_t \\le \\widehat{\\mathrm{VaR}}_\\alpha\\right]"}
         number="6"
       />
       <p>

@@ -238,7 +238,7 @@ export async function getRecentTrades(limit = 50) {
       ABS((d.target_weight - COALESCE(d.prev_weight, 0))
           * COALESCE(n.nav, 0) / NULLIF(o.adj_close, 0))::float          AS quantity,
       COALESCE(o.adj_close, 0)::float                                    AS price,
-      0::float                                                           AS slippage_bps,
+      10.0::float                                                        AS slippage_bps,
       0::float                                                           AS commission,
       ABS((d.target_weight - COALESCE(d.prev_weight, 0))
           * COALESCE(n.nav, 0))::float                                   AS notional,

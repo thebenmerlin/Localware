@@ -63,13 +63,13 @@ export default async function Page() {
       <h3>VaR&nbsp;methodology</h3>
       <p className="max-w-column">
         We use a non-parametric historical VaR: given a daily-return series&nbsp;
-        <InlineEq tex="\\{r_t\\}_{t=1}^{T}" />, the&nbsp;<InlineEq tex="\\alpha" />-quantile estimate is
+        <InlineEq tex={"\\{r_t\\}_{t=1}^{T}"} />, the&nbsp;<InlineEq tex={"\\alpha"} />-quantile estimate is
       </p>
-      <Equation tex="\\widehat{\\mathrm{VaR}}_\\alpha = \\mathrm{Quantile}_\\alpha\\!\\left(\\{r_t\\}\\right)" number="1" />
+      <Equation tex={"\\widehat{\\mathrm{VaR}}_\\alpha = \\mathrm{Quantile}_\\alpha\\!\\left(\\{r_t\\}\\right)"} number="1" />
       <p className="max-w-column">
         and the expected shortfall (CVaR) is the conditional mean below that quantile,
       </p>
-      <Equation tex="\\widehat{\\mathrm{ES}}_\\alpha = \\mathbb{E}\\!\\left[r_t \\mid r_t \\le \\widehat{\\mathrm{VaR}}_\\alpha\\right]." number="2" />
+      <Equation tex={"\\widehat{\\mathrm{ES}}_\\alpha = \\mathbb{E}\\!\\left[r_t \\mid r_t \\le \\widehat{\\mathrm{VaR}}_\\alpha\\right]."} number="2" />
 
       <Figure
         number="7"
@@ -100,7 +100,7 @@ export default async function Page() {
         size, value, profitability, and a low-vol/conservative proxy — and report the OLS coefficients.
       </p>
       <Equation
-        tex="r_t^p = \\alpha + \\beta_{\\mathrm{MKT}} \\mathrm{MKT}_t + \\beta_{\\mathrm{SMB}} \\mathrm{SMB}_t + \\beta_{\\mathrm{HML}} \\mathrm{HML}_t + \\beta_{\\mathrm{RMW}} \\mathrm{RMW}_t + \\beta_{\\mathrm{CMA}} \\mathrm{CMA}_t + \\varepsilon_t"
+        tex={"r_t^p = \\alpha + \\beta_{\\mathrm{MKT}} \\mathrm{MKT}_t + \\beta_{\\mathrm{SMB}} \\mathrm{SMB}_t + \\beta_{\\mathrm{HML}} \\mathrm{HML}_t + \\beta_{\\mathrm{RMW}} \\mathrm{RMW}_t + \\beta_{\\mathrm{CMA}} \\mathrm{CMA}_t + \\varepsilon_t"}
         number="3"
       />
 
