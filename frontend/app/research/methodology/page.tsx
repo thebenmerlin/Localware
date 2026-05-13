@@ -14,7 +14,7 @@ export default function Page() {
             with Volatility Targeting and a Drawdown Overlay
           </span>
         </h1>
-        <div className="caption mt-3 not-italic">Localware Capital · Research Note 26-01</div>
+        <div className="caption mt-3 not-italic">Localware · Research Note 26-01</div>
       </div>
 
       <Abstract>

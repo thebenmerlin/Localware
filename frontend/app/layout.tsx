@@ -5,7 +5,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { ThemeScript } from "@/components/ThemeScript";
 
 export const metadata: Metadata = {
-  title: "Localware Capital — Quantitative Multi-Factor Fund",
+  title: "Localware — Quantitative Multi-Factor Fund",
   description:
     "An automated, multi-factor systematic equity strategy with risk-parity weighting and volatility targeting.",
 };
@@ -21,7 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="max-w-wide mx-auto px-6 py-3.5 flex items-baseline gap-x-8 gap-y-2 flex-wrap">
             <div className="flex items-baseline gap-3">
               <h1 className="text-[1.05rem] !mt-0 !mb-0 font-display font-semibold tracking-tight">
-                Localware Capital
+                Localware
               </h1>
               <span className="smallcaps !text-[0.65rem]">est. 2026 · multi-factor</span>
             </div>

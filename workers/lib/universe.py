@@ -21,7 +21,7 @@ from . import db
 
 SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 SP400_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_400_companies"
-USER_AGENT = "Mozilla/5.0 (Localware-Capital research-bot; benmerlin1969@gmail.com)"
+USER_AGENT = "Mozilla/5.0 (Localware research-bot; benmerlin1969@gmail.com)"
 
 # Always-included instruments that aren't constituents themselves.
 SUPPLEMENTARY = [

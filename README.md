@@ -1,4 +1,4 @@
-# Localware Capital — Automated Hedge Fund
+# Localware — Automated Hedge Fund
 
 A fully self-contained, automated, multi-factor systematic equity portfolio.
 

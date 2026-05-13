@@ -78,7 +78,7 @@ export default async function Page() {
     <div className="space-y-2">
       <header className="text-center">
         <div className="smallcaps">Fund Fact Sheet</div>
-        <h1 className="!mt-1">Localware Capital — Multi-Factor Equity</h1>
+        <h1 className="!mt-1">Localware — Multi-Factor Equity</h1>
         <div className="caption !mt-1 not-italic">
           As of {asOfDate} · Inception {inceptionDate} · Reporting currency USD
         </div>
