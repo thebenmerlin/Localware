@@ -3,6 +3,7 @@ import { PaperTable } from "@/components/paper/PaperTable";
 import { Figure } from "@/components/paper/Figure";
 import { AcademicBar } from "@/components/charts/BarChart";
 import { pct, money, num, signed } from "@/lib/format";
+import { Ticker } from "@/components/Ticker";
 
 export const revalidate = 300;
 
@@ -89,7 +90,7 @@ export default async function Page() {
         <tbody>
           {positions.map((p) => (
             <tr key={p.ticker}>
-              <td className="font-mono">{p.ticker}</td>
+              <td><Ticker symbol={p.ticker} /></td>
               <td className="text-muted text-small">{p.sector}</td>
               <td className="num">{Number(p.quantity).toFixed(0)}</td>
               <td className="num">${num(Number(p.avg_cost), 2)}</td>

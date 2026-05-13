@@ -2,6 +2,7 @@ import { getStrategies, getStrategyContribution, getStrategySignals } from "@/li
 import { PaperTable } from "@/components/paper/PaperTable";
 import { pct, money, num } from "@/lib/format";
 import { InlineEq } from "@/components/paper/Equation";
+import { Ticker } from "@/components/Ticker";
 
 export const revalidate = 300;
 
@@ -104,7 +105,7 @@ export default async function Page() {
                 )}
                 {sigs.map((sig) => (
                   <tr key={sig.ticker}>
-                    <td className="font-mono">{sig.ticker}</td>
+                    <td><Ticker symbol={sig.ticker} /></td>
                     <td className="num">{num(Number(sig.score), 4)}</td>
                     <td className={`num ${Number(sig.signal) >= 0 ? "text-positive" : "text-negative"}`}>
                       {pct(Number(sig.signal), 3)}

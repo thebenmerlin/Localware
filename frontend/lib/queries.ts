@@ -472,6 +472,24 @@ export async function getBacktests() {
   `;
 }
 
+// ---------------------------------------------------------------------------
+// Per-ticker historical prices (powers the hover sparkline)
+// ---------------------------------------------------------------------------
+
+export async function getTickerPrices(ticker: string, days = 30) {
+  return sql<{ date: string; close: number }[]>`
+    SELECT
+      o.date,
+      COALESCE(o.adj_close, o.close)::float AS close
+    FROM raw.ohlcv_daily o
+    JOIN securities s ON s.id = o.security_id
+    WHERE UPPER(s.ticker) = UPPER(${ticker})
+      AND COALESCE(o.adj_close, o.close) IS NOT NULL
+    ORDER BY o.date DESC
+    LIMIT ${days};
+  `;
+}
+
 export async function getBacktest(id: number) {
   const rows = await sql<
     {

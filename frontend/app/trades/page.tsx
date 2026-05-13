@@ -1,6 +1,7 @@
 import { getRecentTrades } from "@/lib/queries";
 import { PaperTable } from "@/components/paper/PaperTable";
 import { money, num } from "@/lib/format";
+import { Ticker } from "@/components/Ticker";
 
 export const revalidate = 300;
 
@@ -67,7 +68,7 @@ export default async function Page() {
           {trades.map((t, i) => (
             <tr key={i}>
               <td className="text-small text-muted">{String(t.executed_at).slice(0, 16).replace("T", " ")}</td>
-              <td className="font-mono">{t.ticker}</td>
+              <td><Ticker symbol={t.ticker} /></td>
               <td className={t.side === "BUY" ? "text-positive" : "text-negative"}>{t.side}</td>
               <td className="text-small text-muted italic">{t.strategy ?? "—"}</td>
               <td className="num">{Number(t.quantity).toFixed(0)}</td>

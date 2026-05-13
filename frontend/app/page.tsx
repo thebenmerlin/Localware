@@ -12,6 +12,7 @@ import { PaperTable } from "@/components/paper/PaperTable";
 import { Abstract, Lede } from "@/components/paper/Section";
 import { AcademicLine } from "@/components/charts/AcademicLine";
 import { pct, money, num, signed } from "@/lib/format";
+import { Ticker } from "@/components/Ticker";
 
 export const revalidate = 300;
 
@@ -124,7 +125,7 @@ export default async function Page() {
             <tbody>
               {positions.slice(0, 12).map((p) => (
                 <tr key={p.ticker}>
-                  <td className="font-mono">{p.ticker}</td>
+                  <td><Ticker symbol={p.ticker} /></td>
                   <td className="text-muted text-small">{p.sector}</td>
                   <td className="num">{pct(Number(p.weight))}</td>
                   <td className="num">{money(Number(p.market_value))}</td>
@@ -187,7 +188,7 @@ export default async function Page() {
             {trades.map((t, i) => (
               <tr key={i}>
                 <td className="text-small text-muted">{String(t.executed_at).slice(0, 10)}</td>
-                <td className="font-mono">{t.ticker}</td>
+                <td><Ticker symbol={t.ticker} /></td>
                 <td className={t.side === "BUY" ? "text-positive" : "text-negative"}>{t.side}</td>
                 <td className="text-small text-muted italic">{t.strategy ?? "—"}</td>
                 <td className="num">{Number(t.quantity).toFixed(0)}</td>
