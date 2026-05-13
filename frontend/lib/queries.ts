@@ -114,7 +114,12 @@ export async function getAllMetrics() {
 
 export async function getCurrentPositions() {
   // We only track TARGET weights — quantity / avg_cost / unrealized_pnl are
-  // synthesized so the UI's table contract stays the same.
+  // synthesized:
+  //   quantity        = target_weight * NAV / current_price
+  //   avg_cost        = price on the security's first nonzero-weight date
+  //                     (used as a cost-basis proxy since no trade ledger exists)
+  //   unrealized_pnl  = quantity * (current_price - avg_cost)
+  // adj_close can be NULL when the price feed only fills `close`, so coalesce.
   return sql<
     {
       ticker: string;
@@ -131,29 +136,50 @@ export async function getCurrentPositions() {
       SELECT MAX(date) AS d FROM portfolio.positions_daily
     ),
     latest_nav AS (
-      SELECT nav::float AS nav FROM portfolio.nav_daily ORDER BY date DESC LIMIT 1
+      SELECT nav::float AS nav FROM portfolio.nav_daily
+      WHERE nav IS NOT NULL
+      ORDER BY date DESC LIMIT 1
     ),
     latest_px AS (
       SELECT DISTINCT ON (security_id)
         security_id,
-        adj_close::float AS px
+        COALESCE(adj_close, close)::float AS px
       FROM raw.ohlcv_daily
+      WHERE COALESCE(adj_close, close) IS NOT NULL
       ORDER BY security_id, date DESC
+    ),
+    entry_date AS (
+      SELECT security_id, MIN(date) AS first_date
+      FROM portfolio.positions_daily
+      WHERE target_weight <> 0
+      GROUP BY security_id
+    ),
+    entry_px AS (
+      SELECT
+        ed.security_id,
+        (SELECT COALESCE(o.adj_close, o.close) FROM raw.ohlcv_daily o
+          WHERE o.security_id = ed.security_id
+            AND o.date <= ed.first_date
+            AND COALESCE(o.adj_close, o.close) IS NOT NULL
+          ORDER BY o.date DESC LIMIT 1)::float AS px
+      FROM entry_date ed
     )
     SELECT
       s.ticker,
       COALESCE(s.name, s.ticker)            AS name,
       COALESCE(s.sector, '-')               AS sector,
       (pd.target_weight * COALESCE(ln.nav, 0) / NULLIF(px.px, 0))::float AS quantity,
-      COALESCE(px.px, 0)::float             AS avg_cost,
+      COALESCE(ep.px, px.px, 0)::float      AS avg_cost,
       (pd.target_weight * COALESCE(ln.nav, 0))::float AS market_value,
       pd.target_weight::float               AS weight,
-      0::float                              AS unrealized_pnl
+      ((pd.target_weight * COALESCE(ln.nav, 0) / NULLIF(px.px, 0))
+        * (COALESCE(px.px, 0) - COALESCE(ep.px, px.px, 0)))::float AS unrealized_pnl
     FROM portfolio.positions_daily pd
     JOIN latest_date ld ON pd.date = ld.d
     JOIN securities s ON s.id = pd.security_id
     LEFT JOIN latest_nav ln ON TRUE
     LEFT JOIN latest_px px ON px.security_id = pd.security_id
+    LEFT JOIN entry_px ep ON ep.security_id = pd.security_id
     ORDER BY ABS(pd.target_weight) DESC;
   `;
 }
@@ -223,15 +249,17 @@ export async function getRecentTrades(limit = 50) {
     FROM diffs d
     JOIN securities s                ON s.id = d.security_id
     LEFT JOIN LATERAL (
-      SELECT adj_close, date
+      SELECT COALESCE(adj_close, close) AS adj_close, date
       FROM raw.ohlcv_daily
-      WHERE security_id = d.security_id AND date < d.date
+      WHERE security_id = d.security_id
+        AND date < d.date
+        AND COALESCE(adj_close, close) IS NOT NULL
       ORDER BY date DESC LIMIT 1
     ) o ON TRUE
     LEFT JOIN LATERAL (
       SELECT nav
       FROM portfolio.nav_daily
-      WHERE date < d.date
+      WHERE date < d.date AND nav IS NOT NULL
       ORDER BY date DESC LIMIT 1
     ) n ON TRUE
     WHERE (d.target_weight - COALESCE(d.prev_weight, 0)) <> 0
