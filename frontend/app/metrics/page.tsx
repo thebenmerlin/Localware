@@ -3,7 +3,7 @@ import { Figure } from "@/components/paper/Figure";
 import { KPI } from "@/components/paper/KPI";
 import { AcademicLine } from "@/components/charts/AcademicLine";
 import { MonthlyHeatmap } from "@/components/charts/Heatmap";
-import { pct, num, signed } from "@/lib/format";
+import { pct, num, signed, money } from "@/lib/format";
 
 export const revalidate = 300;
 
@@ -69,6 +69,11 @@ export default async function Page() {
   const alpha = Number(all?.alpha ?? 0);
   const winRate = Number(all?.hit_rate ?? 0);
 
+  const startNav = Number(data.equity?.[0]?.nav ?? 0);
+  const lastNav = Number(data.equity?.[data.equity.length - 1]?.nav ?? 0);
+  const totalPnl = lastNav - startNav;
+  const totalRet = Number(all?.total_return ?? 0);
+
   function fmtMonth(m: MonthlyPt | null) {
     if (!m) return "—";
     return `${MONTH_NAMES[m.month - 1]} ${m.year}`;
@@ -117,9 +122,9 @@ export default async function Page() {
         <KPI label="Alpha (annualised)"  value={pct(alpha, 2)}
              tone={alpha >= 0 ? "positive" : "negative"}
              sub="Jensen, vs SPY" />
-        <KPI label="Total return"        value={pct(Number(all?.total_return ?? 0))}
-             tone={Number(all?.total_return ?? 0) >= 0 ? "positive" : "negative"}
-             sub={`Since ${inceptionDate}`} />
+        <KPI label="Total P&L"           value={`${totalPnl >= 0 ? "+" : "-"}${money(Math.abs(totalPnl))}`}
+             tone={totalPnl >= 0 ? "positive" : "negative"}
+             sub={`${pct(totalRet)} since ${inceptionDate}`} />
       </div>
 
       <h4>Trailing returns</h4>

@@ -9,7 +9,6 @@ import {
 import { KPI } from "@/components/paper/KPI";
 import { Figure } from "@/components/paper/Figure";
 import { PaperTable } from "@/components/paper/PaperTable";
-import { Abstract, Lede } from "@/components/paper/Section";
 import { AcademicLine } from "@/components/charts/AcademicLine";
 import { pct, money, num, signed } from "@/lib/format";
 import { Ticker } from "@/components/Ticker";
@@ -39,20 +38,11 @@ export default async function Page() {
   return (
     <div className="space-y-2">
       <div className="text-center mb-2">
-        <div className="smallcaps">Letter to investors</div>
-        <h1 className="font-display tracking-tight !mt-1">A Multi-Factor Systematic Portfolio</h1>
-        <div className="caption !mt-1 not-italic">
-          Period under management: {eqData[0]?.date ?? "—"} to {eqData.at(-1)?.date ?? "—"}
-        </div>
+        <h1 className="font-display tracking-tight !mt-1" style={{ fontSize: "2.15rem" }}>
+          Localware: A multi-factor systematic portfolio
+        </h1>
+        <div className="caption !mt-1 not-italic">by Gajanan Barve</div>
       </div>
-
-      <Abstract>
-        We document the live performance of an automated long–short equity portfolio combining
-        cross-sectional momentum, quality, low-volatility, and short-term mean-reversion sleeves
-        under a 12% volatility target with a per-name 5% cap and an 8% drawdown overlay. The
-        system fetches prices, generates signals, simulates execution, and marks-to-market entirely
-        in-process, with no broker or third-party trading API in the data path.
-      </Abstract>
 
       <hr className="rule" />
 
