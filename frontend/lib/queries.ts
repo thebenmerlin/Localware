@@ -216,14 +216,24 @@ export async function getRecentTrades(limit = 50) {
       0::float                                                           AS commission,
       ABS((d.target_weight - COALESCE(d.prev_weight, 0))
           * COALESCE(n.nav, 0))::float                                   AS notional,
-      ((d.date::timestamp) + INTERVAL '16 hours')::text                  AS executed_at,
+      ((o.date::timestamp) + INTERVAL '16 hours')::text                  AS executed_at,
       NULL::text                                                         AS strategy,
       ('weight ' || ROUND(COALESCE(d.prev_weight, 0)::numeric, 4)
                  || ' → ' || ROUND(d.target_weight::numeric, 4))         AS reason
     FROM diffs d
     JOIN securities s                ON s.id = d.security_id
-    LEFT JOIN raw.ohlcv_daily o      ON o.security_id = d.security_id AND o.date = d.date
-    LEFT JOIN portfolio.nav_daily n  ON n.date = d.date
+    LEFT JOIN LATERAL (
+      SELECT adj_close, date
+      FROM raw.ohlcv_daily
+      WHERE security_id = d.security_id AND date < d.date
+      ORDER BY date DESC LIMIT 1
+    ) o ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT nav
+      FROM portfolio.nav_daily
+      WHERE date < d.date
+      ORDER BY date DESC LIMIT 1
+    ) n ON TRUE
     WHERE (d.target_weight - COALESCE(d.prev_weight, 0)) <> 0
     ORDER BY d.date DESC, ABS(d.target_weight - COALESCE(d.prev_weight, 0)) DESC
     LIMIT ${limit};
