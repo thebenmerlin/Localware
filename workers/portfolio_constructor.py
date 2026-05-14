@@ -37,6 +37,7 @@ import pandas as pd
 
 from .lib import db
 from .portfolio_optimizer import solve_ensemble
+from .score_ensemble import load_latest_member_weights
 
 
 # --- spec-driven tunables ---------------------------------------------------
