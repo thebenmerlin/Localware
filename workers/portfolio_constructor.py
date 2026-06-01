@@ -35,7 +35,7 @@ import datetime as dt
 import numpy as np
 import pandas as pd
 
-from .lib import db
+from .lib import db, universe
 from .portfolio_optimizer import solve_ensemble
 from .score_ensemble import load_latest_member_weights
 
@@ -276,12 +276,18 @@ def construct(as_of: dt.date | None = None) -> pd.DataFrame:
     member_w = load_latest_member_weights(as_of)
     print(f"  loaded {len(member_w)} member scores (sum={float(member_w.sum()):.2f})")
 
+    # SPY/MDY benchmark → turns on the optimizer's beta-neutral projection,
+    # stripping uncompensated market variance out of the book.
+    benchmark = universe.benchmark_prices(as_of)
+    print(f"  benchmark prices loaded: {len(benchmark)} days "
+          f"({'beta-neutral on' if len(benchmark) > 30 else 'beta-neutral OFF — insufficient history'})")
+
     pre_opt = solve_ensemble(
         alpha=alpha,
         panel=panel,
         sectors=sectors_known,
         prev_w=prev_w,
-        benchmark=None,  # wire up market ETF once it lives in `securities`
+        benchmark=benchmark if len(benchmark) > 30 else None,
         member_weights=member_w if not member_w.empty else None,
     )
     # Re-index to the full signal universe so downstream code (sids lookup,

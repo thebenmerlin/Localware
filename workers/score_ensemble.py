@@ -23,7 +23,7 @@ import datetime as dt
 
 import pandas as pd
 
-from .lib import db
+from .lib import db, universe
 from .portfolio_optimizer import score_members_walk_forward
 
 
@@ -112,18 +112,22 @@ def score(
     alpha_h = _load_signals_history(as_of, history_days)
     panel = _load_price_history(as_of, history_days)
     sectors = _load_sectors()
+    # Same SPY/MDY benchmark used live, so beta-neutral members are scored on
+    # the variant that actually gets deployed.
+    benchmark = universe.benchmark_prices(as_of, days=history_days)
 
     if alpha_h.empty or panel.empty or sectors.empty:
         print(f"  insufficient inputs (alpha={alpha_h.shape}, panel={panel.shape}, "
               f"sectors={len(sectors)}) — abort.")
         return pd.DataFrame()
-    print(f"  loaded alpha={alpha_h.shape}  panel={panel.shape}  sectors={len(sectors)}")
+    print(f"  loaded alpha={alpha_h.shape}  panel={panel.shape}  sectors={len(sectors)}  "
+          f"benchmark={len(benchmark)}d")
 
     scores = score_members_walk_forward(
         alpha_history=alpha_h,
         panel=panel,
         sectors=sectors,
-        benchmark=None,
+        benchmark=benchmark if len(benchmark) > 30 else None,
         n_steps=n_steps,
         n_warmup=n_warmup,
         cost_bps=cost_bps,

@@ -123,32 +123,91 @@ def _allocation_weights() -> dict[str, float]:
     return w
 
 
+def _enabled_sleeves() -> set[str]:
+    """Sleeve names the strategies table has enabled; all defaults if empty."""
+    rows = db.query("SELECT name FROM strategies WHERE enabled = TRUE;")
+    names = {r["name"] for r in (rows or [])}
+    return names or set(DEFAULT_ALLOC.keys())
+
+
+# --- risk-parity sleeve allocation ------------------------------------------
+
+RP_VOL_LOOKBACK = 60
+
+
+def _sleeve_vol(weights: pd.Series, panel: pd.DataFrame, lookback: int = RP_VOL_LOOKBACK) -> float:
+    """Standalone annualized vol of a sleeve's signal vector, via the price cov."""
+    common = weights.index.intersection(panel.columns)
+    if len(common) == 0:
+        return 0.0
+    rets = panel[common].pct_change().iloc[-lookback:].dropna(how="all")
+    if rets.empty:
+        return 0.0
+    rets = rets.fillna(0.0)
+    w = weights.loc[common].values.astype(float)
+    cov = np.cov(rets.values, rowvar=False) * 252
+    if cov.ndim == 0:
+        cov = np.array([[float(cov)]])
+    return float(np.sqrt(max(float(w @ cov @ w), 0.0)))
+
+
+def _risk_parity_alloc(
+    sleeves: dict[str, pd.Series],
+    panel: pd.DataFrame,
+    enabled: set[str],
+    lookback: int = RP_VOL_LOOKBACK,
+) -> dict[str, float]:
+    """Inverse-volatility weights across enabled, non-empty sleeves.
+
+    Each sleeve is sized so it contributes comparable standalone risk to the
+    book (risk parity), replacing the static 40/25/20/15 split. Returns {} when
+    no sleeve has a computable vol, so the caller can fall back to static."""
+    inv: dict[str, float] = {}
+    for name, sig in sleeves.items():
+        if name not in enabled or sig is None or sig.empty:
+            continue
+        v = _sleeve_vol(sig, panel, lookback)
+        if v > 0:
+            inv[name] = 1.0 / v
+    total = sum(inv.values())
+    if total <= 0:
+        return {}
+    return {k: v / total for k, v in inv.items()}
+
+
 # --- sleeves (vectorized) ---------------------------------------------------
+#
+# Each sleeve emits a *continuous cross-sectional z-score* (a standardized
+# factor view), not a hard ±1/N basket. The blended z-score is the alpha the
+# downstream MVO sizes and the overlays cap, so feeding it continuous,
+# winsorized, comparably-scaled scores uses far more of each signal than rank
+# cliffs did. The MVO + per-name / gross caps control final long/short sizing.
+
+def _standardize(raw: pd.Series) -> pd.Series:
+    """Winsorize then cross-sectionally z-score a raw factor metric.
+
+    Returns an empty Series if fewer than 5 valid names (too thin to rank)."""
+    s = raw.replace([np.inf, -np.inf], np.nan).dropna()
+    if len(s) < 5:
+        return pd.Series(dtype=float)
+    return mathx.zscore(mathx.winsorize(s))
+
 
 def compute_momentum(panel: pd.DataFrame, **p) -> pd.Series:
-    """12-1 momentum: return from (-lookback) to (-skip). Long top, short bottom."""
-    lookback, skip, longs, shorts = p["lookback"], p["skip"], p["longs"], p["shorts"]
+    """12-1 momentum standardized cross-sectionally (long high, short low)."""
+    lookback, skip = p["lookback"], p["skip"]
     if panel.empty or len(panel) < lookback + skip + 1:
         return pd.Series(dtype=float)
 
     p_skip = panel.shift(skip).iloc[-1]
     p_lb = panel.shift(lookback).iloc[-1]
     mom = (p_skip / p_lb) - 1.0
-    mom = mom.replace([np.inf, -np.inf], np.nan).dropna()
-    if len(mom) < (longs + shorts):
-        return pd.Series(dtype=float)
-
-    ranked = mom.sort_values()
-    out = pd.Series(0.0, index=mom.index)
-    if shorts > 0:
-        out.loc[ranked.head(shorts).index] = -1.0 / shorts
-    out.loc[ranked.tail(longs).index] = 1.0 / longs
-    return out[out != 0]
+    return _standardize(mom)
 
 
 def compute_quality(fund_ttm: pd.DataFrame, **p) -> pd.Series:
-    """High ROE, low D/E. Long-only top N by composite z-score."""
-    longs, min_roe, max_de = p["longs"], p["min_roe"], p["max_de"]
+    """High ROE, low D/E composite, standardized over the eligible set."""
+    min_roe, max_de = p["min_roe"], p["max_de"]
     if fund_ttm.empty:
         return pd.Series(dtype=float)
 
@@ -160,18 +219,17 @@ def compute_quality(fund_ttm: pd.DataFrame, **p) -> pd.Series:
     de = de.where(de <= 10, de / 100)
 
     elig_mask = roe.notna() & de.notna() & (roe >= min_roe) & (de.between(0, max_de))
-    elig = pd.DataFrame({"roe": roe[elig_mask], "de": de[elig_mask]})
-    if len(elig) < 5:
+    if int(elig_mask.sum()) < 5:
         return pd.Series(dtype=float)
 
-    z = mathx.zscore(mathx.winsorize(elig["roe"])) - mathx.zscore(mathx.winsorize(elig["de"]))
-    top = z.sort_values(ascending=False).head(longs)
-    return pd.Series(1.0 / len(top), index=top.index)
+    comp = (mathx.zscore(mathx.winsorize(roe[elig_mask]))
+            - mathx.zscore(mathx.winsorize(de[elig_mask])))
+    return _standardize(comp)
 
 
 def compute_low_volatility(panel: pd.DataFrame, **p) -> pd.Series:
-    """Bottom-quantile 60-day realized vol; equal weight long-only."""
-    lookback, q = p["lookback"], p["quantile"]
+    """Negative realized vol, standardized (low vol → high score)."""
+    lookback = p["lookback"]
     if panel.empty or len(panel) < lookback + 5:
         return pd.Series(dtype=float)
 
@@ -182,28 +240,20 @@ def compute_low_volatility(panel: pd.DataFrame, **p) -> pd.Series:
     vol = vol.replace([np.inf, -np.inf], np.nan).dropna()
     if vol.empty:
         return pd.Series(dtype=float)
-
-    cutoff = vol.quantile(q)
-    basket = vol[vol <= cutoff]
-    if basket.empty:
-        return pd.Series(dtype=float)
-    return pd.Series(1.0 / len(basket), index=basket.index)
+    return _standardize(-vol)
 
 
 def compute_mean_reversion(panel: pd.DataFrame, **p) -> pd.Series:
-    """RSI<th AND price>MA. Signal stays active for hold_days after trigger."""
-    rsi_p, rsi_th, ma_p, hold = p["rsi_period"], p["rsi_th"], p["ma_period"], p["hold_days"]
+    """Oversold-in-uptrend: (50 − RSI) for names above their MA, standardized."""
+    rsi_p, ma_p = p["rsi_period"], p["ma_period"]
     if panel.empty or len(panel) < ma_p + 5:
         return pd.Series(dtype=float)
 
-    rsi_panel = mathx.rsi(panel, period=rsi_p)
-    ma_panel = panel.rolling(ma_p, min_periods=ma_p).mean()
-    triggered = (rsi_panel < rsi_th) & (panel > ma_panel)
-    active = triggered.iloc[-hold:].any(axis=0)
-    basket = active[active].index
-    if len(basket) == 0:
-        return pd.Series(dtype=float)
-    return pd.Series(1.0 / len(basket), index=basket)
+    rsi_now = mathx.rsi(panel, period=rsi_p).iloc[-1]
+    ma_now = panel.rolling(ma_p, min_periods=ma_p).mean().iloc[-1]
+    uptrend = panel.iloc[-1] > ma_now
+    raw = (50.0 - rsi_now).where(uptrend)   # higher = more oversold in an uptrend
+    return _standardize(raw)
 
 
 # --- blend ------------------------------------------------------------------
@@ -257,12 +307,29 @@ def run(as_of: dt.date | None = None, history_days: int = DEFAULT_HISTORY_DAYS) 
         print(f"  sleeve {name:>15}: n={len(s):>4}  "
               f"sum={float(s.sum()):+.4f}  gross={float(s.abs().sum()):.4f}")
 
-    alloc = _allocation_weights()
+    enabled = _enabled_sleeves()
+    alloc = _risk_parity_alloc(sleeves, panel, enabled)
+    if alloc:
+        print("  risk-parity alloc: "
+              + ", ".join(f"{k}={v:.3f}" for k, v in sorted(alloc.items())))
+    else:
+        # Fall back to the static table/default weights (enabled sleeves only).
+        alloc = {k: v for k, v in _allocation_weights().items() if k in enabled}
+        print("  risk-parity unavailable — static alloc: "
+              + ", ".join(f"{k}={v:.3f}" for k, v in sorted(alloc.items())))
+
     blended, attribution = blend(sleeves, alloc)
     blended = blended[blended.abs() > 1e-9]
     if blended.empty:
         print("No blended signal produced.")
         return {"rows": 0}
+
+    # Re-standardize the combined score so the alpha handed to the MVO has a
+    # stable unit cross-sectional scale regardless of sleeve count / weights.
+    bstd = blended.std()
+    if bstd and not pd.isna(bstd) and bstd > 0:
+        blended = blended / bstd
+        attribution = attribution / bstd
 
     print(f"  blended: {len(blended)} non-zero names  "
           f"gross={float(blended.abs().sum()):.4f}  net={float(blended.sum()):+.4f}")

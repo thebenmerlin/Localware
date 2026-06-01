@@ -158,6 +158,45 @@ def get_benchmark() -> dict | None:
     return rows[0] if rows else None
 
 
+BENCHMARK_TICKERS = ("SPY", "MDY")
+
+
+def benchmark_prices(as_of, days: int = 300, tickers=BENCHMARK_TICKERS):
+    """Synthetic benchmark price series up to `as_of` for beta neutralization.
+
+    Equal-weights the daily returns of whichever of `tickers` (SPY large-cap +
+    MDY mid-cap, to span the S&P 500 + 400 universe) have data, then cumulates
+    them back into a price index. Returned as a pd.Series indexed by date, the
+    shape `portfolio_optimizer._beta_vector` expects. Empty Series if no
+    benchmark prices exist (caller falls back to no beta constraint).
+    """
+    import pandas as pd  # local import — pandas is heavy
+
+    start = as_of - dt.timedelta(days=int(days * 1.7))
+    rows = db.query(
+        """
+        SELECT s.ticker, o.date, o.adj_close
+        FROM raw.ohlcv_daily o
+        JOIN securities s ON s.id = o.security_id
+        WHERE s.ticker = ANY(%s) AND o.date BETWEEN %s AND %s
+        ORDER BY o.date;
+        """,
+        (list(tickers), start, as_of),
+    )
+    if not rows:
+        return pd.Series(dtype=float)
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
+    wide = (
+        df.pivot(index="date", columns="ticker", values="adj_close")
+          .sort_index()
+          .astype(float)
+          .ffill(limit=2)
+    )
+    bench_ret = wide.pct_change().mean(axis=1)  # equal-weight across available ETFs
+    return (1.0 + bench_ret.fillna(0.0)).cumprod()
+
+
 # ---- static fallback (last refreshed 2026-05) ------------------------------
 # (ticker, name, sector, industry)
 # Both lists are intentionally compact — only the columns we use downstream.

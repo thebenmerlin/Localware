@@ -28,6 +28,16 @@ Next.js 15          →  TypeScript, Tailwind, Recharts, KaTeX
 
 **Risk overlays:** 12% portfolio vol target, gross exposure halved when drawdown > 8%, 25% sector cap, 5% per-name cap, 1.5× max gross leverage.
 
+## Ideas to improve Sharpe
+
+- Volatility-scale the momentum signal (risk-adjusted 12-1) instead of raw price return.
+- Forecast portfolio vol with an EWMA (and EWMA covariance) so the vol target reacts faster than trailing realized.
+- Add a no-trade band so positions rebalance only past a deviation threshold, cutting turnover cost drag.
+- Neutralize momentum within sector before ranking to avoid unintended sector bets.
+- Add a low-correlation short-horizon sleeve (1–5 day reversal) to diversify the momentum-heavy book.
+- Shrink the ensemble member weights toward equal-weight to reduce out-of-sample overfitting of the Sharpe combiner.
+- Replace the binary drawdown halving with a continuous de-risk curve plus a 200-DMA market-regime gross filter.
+
 ## Layout
 
 ```
