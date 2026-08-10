@@ -2,7 +2,7 @@
 
 export default function Error({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center px-6 py-24 text-center">
+    <div>
       <div className="font-display text-2xl">Couldn't load latest figures.</div>
       <button
         onClick={() => reset()}
@@ -10,6 +10,6 @@ export default function Error({ reset }: { error: Error & { digest?: string }; r
       >
         retry
       </button>
-    </main>
+    </div>
   );
 }

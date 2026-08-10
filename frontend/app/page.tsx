@@ -77,56 +77,54 @@ export default async function Page() {
   const asOf = nav?.date ? String(nav.date).slice(0, 10) : null;
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center px-6 py-24">
-      <div className="w-full max-w-dashboard flex flex-col items-center">
-        {/* Hero: NAV + Day P&L */}
-        <BigStat label="NAV" value={fullMoney(navValue)} size="hero" />
-        <div className={`mt-4 flex items-center gap-2 ${dayTone === "positive" ? "text-[var(--positive)]" : dayTone === "negative" ? "text-[var(--negative)]" : "text-[var(--muted)]"}`}>
-          <PixelArrow direction={dayDirection} className="h-4 w-4" />
-          <span className="tabular font-mono text-lg">
-            {signed(navChange, 0) !== "—" ? `${navChange && navChange > 0 ? "+" : ""}${fullMoney(navChange)}` : "—"}
-          </span>
-          <span className="tabular font-mono text-lg text-[var(--muted)]">
-            ({dayReturnPct !== null ? signed(dayReturnPct * 100, 2) + "%" : "—"})
-          </span>
-        </div>
-
-        {/* Secondary row: Sharpe, Drawdown, Ann. Return */}
-        <div className="mt-20 md:mt-24 grid grid-cols-1 md:grid-cols-3 gap-12 md:gap-16 w-full">
-          <BigStat
-            label="Sharpe (63d)"
-            value={num(sharpeCurr)}
-            delta={{
-              direction: sharpeDirection,
-              tone: sharpeTone,
-              label: sharpeChange !== null ? signed(sharpeChange, 2) : undefined,
-            }}
-          />
-          <BigStat
-            label="Drawdown"
-            value={pct(ddCurr, 1)}
-            delta={{
-              direction: ddDirection,
-              tone: ddTone,
-              label: ddChange !== null ? signed(ddChange * 100, 1) + "%" : undefined,
-            }}
-          />
-          <BigStat
-            label="Ann. Return (1y)"
-            value={pct(annReturn, 1)}
-            delta={{
-              direction: paceDirection,
-              tone: paceTone,
-            }}
-          />
-        </div>
-
-        {asOf && (
-          <div className="mt-20 font-mono text-xs tracking-wide uppercase text-[var(--faint)]">
-            as of {asOf}
-          </div>
-        )}
+    <div>
+      {/* Hero: NAV + Day P&L */}
+      <BigStat label="NAV" value={fullMoney(navValue)} size="hero" />
+      <div className={`mt-4 flex items-center gap-2 ${dayTone === "positive" ? "text-[var(--positive)]" : dayTone === "negative" ? "text-[var(--negative)]" : "text-[var(--muted)]"}`}>
+        <PixelArrow direction={dayDirection} className="h-4 w-4" />
+        <span className="tabular font-mono text-lg">
+          {signed(navChange, 0) !== "—" ? `${navChange && navChange > 0 ? "+" : ""}${fullMoney(navChange)}` : "—"}
+        </span>
+        <span className="tabular font-mono text-lg text-[var(--muted)]">
+          ({dayReturnPct !== null ? signed(dayReturnPct * 100, 2) + "%" : "—"})
+        </span>
       </div>
-    </main>
+
+      {/* Secondary row: Sharpe, Drawdown, Ann. Return */}
+      <div className="mt-20 md:mt-24 grid grid-cols-1 md:grid-cols-3 gap-12 md:gap-16 w-full">
+        <BigStat
+          label="Sharpe (63d)"
+          value={num(sharpeCurr)}
+          delta={{
+            direction: sharpeDirection,
+            tone: sharpeTone,
+            label: sharpeChange !== null ? signed(sharpeChange, 2) : undefined,
+          }}
+        />
+        <BigStat
+          label="Drawdown"
+          value={pct(ddCurr, 1)}
+          delta={{
+            direction: ddDirection,
+            tone: ddTone,
+            label: ddChange !== null ? signed(ddChange * 100, 1) + "%" : undefined,
+          }}
+        />
+        <BigStat
+          label="Ann. Return (1y)"
+          value={pct(annReturn, 1)}
+          delta={{
+            direction: paceDirection,
+            tone: paceTone,
+          }}
+        />
+      </div>
+
+      {asOf && (
+        <div className="mt-20 font-mono text-xs tracking-wide uppercase text-[var(--faint)]">
+          as of {asOf}
+        </div>
+      )}
+    </div>
   );
 }

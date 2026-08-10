@@ -30,7 +30,7 @@ export function BigStat({
   size?: "hero" | "secondary";
 }) {
   return (
-    <div className="flex flex-col items-center text-center">
+    <div className="flex flex-col items-start text-left">
       <div className="font-mono text-[0.7rem] tracking-[0.18em] uppercase text-[var(--muted)]">
         {label}
       </div>
