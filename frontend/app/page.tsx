@@ -91,7 +91,7 @@ export default async function Page() {
       </div>
 
       {/* Secondary row: Sharpe, Drawdown, Ann. Return */}
-      <div className="mt-20 md:mt-24 grid grid-cols-1 md:grid-cols-3 gap-12 md:gap-16 w-full">
+      <div className="mt-14 md:mt-16 grid grid-cols-1 md:grid-cols-3 gap-12 md:gap-16 w-full">
         <BigStat
           label="Sharpe (63d)"
           value={num(sharpeCurr)}
@@ -121,7 +121,7 @@ export default async function Page() {
       </div>
 
       {asOf && (
-        <div className="mt-20 font-mono text-xs tracking-wide uppercase text-[var(--faint)]">
+        <div className="mt-14 font-mono text-xs tracking-wide uppercase text-[var(--faint)]">
           as of {asOf}
         </div>
       )}

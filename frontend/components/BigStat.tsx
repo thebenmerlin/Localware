@@ -36,7 +36,7 @@ export function BigStat({
       </div>
       <div
         className={`tabular font-display font-semibold leading-none ${
-          size === "hero" ? "mt-3 text-7xl md:text-8xl lg:text-9xl" : "mt-2 text-4xl md:text-5xl"
+          size === "hero" ? "mt-3 text-5xl md:text-6xl lg:text-7xl" : "mt-2 text-3xl md:text-4xl"
         }`}
       >
         {value}
