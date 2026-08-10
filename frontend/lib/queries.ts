@@ -47,6 +47,19 @@ export async function getLatestNav() {
   return rows[0] ?? null;
 }
 
+export async function getPreviousNav() {
+  // Second-most-recent row — used to compute day-over-day deltas that
+  // getLatestNav() alone can't express (e.g. the $ change in NAV).
+  const rows = await sql<{ date: string; nav: number }[]>`
+    SELECT date, nav::float AS nav
+    FROM portfolio.nav_daily
+    WHERE nav IS NOT NULL
+    ORDER BY date DESC
+    OFFSET 1 LIMIT 1;
+  `;
+  return rows[0] ?? null;
+}
+
 export async function getEquityCurve() {
   return sql<
     { date: string; nav: number; daily_return: number | null; cumulative_return: number | null }[]

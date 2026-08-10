@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 .next/
 out/
+*.tsbuildinfo
 .DS_Store
 *.log
 .drizzle/

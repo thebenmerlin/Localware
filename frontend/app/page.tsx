@@ -1,199 +1,132 @@
 import {
   getLatestNav,
-  getEquityCurve,
+  getPreviousNav,
   getMetrics,
-  getCurrentPositions,
-  getRecentTrades,
-  getSectorExposure,
+  getRollingSharpe,
+  getDrawdownSeries,
 } from "@/lib/queries";
-import { KPI } from "@/components/paper/KPI";
-import { Figure } from "@/components/paper/Figure";
-import { PaperTable } from "@/components/paper/PaperTable";
-import { AcademicLine } from "@/components/charts/AcademicLine";
-import { pct, money, num, signed } from "@/lib/format";
-import { Ticker } from "@/components/Ticker";
+import { BigStat, type BigStatDelta } from "@/components/BigStat";
+import { PixelArrow } from "@/components/PixelArrow";
+import { pct, num, signed } from "@/lib/format";
 
-export const revalidate = 300;
+export const revalidate = 600;
+
+/** Full-precision dollar formatting for the hero digit — money() from lib/format
+ *  compresses to "$10.5M" which reads small; here we want every digit. */
+function fullMoney(x: number | null | undefined): string {
+  if (x === null || x === undefined || Number.isNaN(x)) return "—";
+  const sign = x < 0 ? "-" : "";
+  return `${sign}$${Math.abs(x).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+}
+
+function deltaOf(change: number | null, epsilon = 1e-9): "up" | "down" | "flat" {
+  if (change === null || Number.isNaN(change)) return "flat";
+  if (change > epsilon) return "up";
+  if (change < -epsilon) return "down";
+  return "flat";
+}
 
 export default async function Page() {
-  const [nav, equity, metrics, positions, trades, sectors] = await Promise.all([
+  const [nav, prevNav, annMetrics, rollingSharpe, drawdown] = await Promise.all([
     getLatestNav(),
-    getEquityCurve(),
-    getMetrics("all"),
-    getCurrentPositions(),
-    getRecentTrades(8),
-    getSectorExposure(),
+    getPreviousNav(),
+    getMetrics("1y"),
+    getRollingSharpe(63),
+    getDrawdownSeries(),
   ]);
 
-  const eqData = equity.map((r) => ({
-    date: String(r.date).slice(0, 10),
-    nav: Number(r.nav),
-    cum: r.cumulative_return ? Number(r.cumulative_return) : 0,
-  }));
-  const annRet = Number(metrics?.ann_return ?? 0);
-  const sharpe = Number(metrics?.sharpe ?? 0);
-  const dd = Number(metrics?.max_drawdown ?? 0);
-  const annVol = Number(metrics?.ann_vol ?? 0);
+  // --- NAV + Day P&L ---------------------------------------------------
+  const navValue = nav?.nav ?? null;
+  const navChange = navValue !== null && prevNav ? navValue - prevNav.nav : null;
+  const dayReturnPct = nav?.daily_return ?? null;
+  const dayDirection = deltaOf(dayReturnPct);
+  const dayTone: BigStatDelta["tone"] =
+    dayDirection === "up" ? "positive" : dayDirection === "down" ? "negative" : "neutral";
+
+  // --- Sharpe (rolling 63d, delta = last two points of the same series) --
+  const sharpeSeries = rollingSharpe.filter((r) => r.sharpe !== null);
+  const sharpeCurr = sharpeSeries.at(-1)?.sharpe ?? null;
+  const sharpePrev = sharpeSeries.at(-2)?.sharpe ?? null;
+  const sharpeChange = sharpeCurr !== null && sharpePrev !== null ? sharpeCurr - sharpePrev : null;
+  const sharpeDirection = deltaOf(sharpeChange);
+  const sharpeTone: BigStatDelta["tone"] =
+    sharpeDirection === "up" ? "positive" : sharpeDirection === "down" ? "negative" : "neutral";
+
+  // --- Drawdown from peak (current, not historical max) ------------------
+  const ddCurr = drawdown.at(-1)?.drawdown ?? null;
+  const ddPrev = drawdown.at(-2)?.drawdown ?? null;
+  const ddChange = ddCurr !== null && ddPrev !== null ? ddCurr - ddPrev : null;
+  const ddDirection = deltaOf(ddChange);
+  // Mechanical direction only — sentiment is judged separately: a deepening
+  // (more negative) drawdown is bad regardless of which way the arrow points.
+  const ddTone: BigStatDelta["tone"] =
+    ddChange === null || ddDirection === "flat" ? "neutral" : ddChange < 0 ? "negative" : "positive";
+
+  // --- Annualized return (1y) --------------------------------------------
+  // No daily series exists for a rolling annualized return yet, so this is a
+  // proxy: is today's realized daily return running above or below the pace
+  // implied by the trailing annualized figure? A real getRollingAnnReturn()
+  // (mirroring getRollingSharpe) is a good fast-follow once this is validated.
+  const annReturn = annMetrics?.ann_return ?? null;
+  const impliedDailyPace = annReturn !== null ? annReturn / 252 : null;
+  const paceGap = dayReturnPct !== null && impliedDailyPace !== null ? dayReturnPct - impliedDailyPace : null;
+  const paceDirection = deltaOf(paceGap);
+  const paceTone: BigStatDelta["tone"] =
+    paceDirection === "up" ? "positive" : paceDirection === "down" ? "negative" : "neutral";
+
+  const asOf = nav?.date ? String(nav.date).slice(0, 10) : null;
 
   return (
-    <div className="space-y-2">
-      <div className="text-center mb-2">
-        <h1 className="font-display tracking-tight !mt-1" style={{ fontSize: "2.15rem" }}>
-          Localware: A multi-factor systematic portfolio
-        </h1>
-        <div className="caption !mt-1 not-italic">by Gajanan Barve</div>
-      </div>
-
-      <hr className="rule" />
-
-      <h4>I. Headline figures</h4>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-3">
-        <KPI
-          label="Annualised return"
-          value={pct(annRet)}
-          tone={annRet >= 0 ? "positive" : "negative"}
-          sub={`Total ${pct(Number(metrics?.total_return ?? 0))} since inception`}
-        />
-        <KPI
-          label="Sharpe ratio"
-          value={num(sharpe)}
-          tone={sharpe >= 1 ? "positive" : "neutral"}
-          sub={`Sortino ${num(Number(metrics?.sortino ?? 0))}`}
-        />
-        <KPI
-          label="Max drawdown"
-          value={pct(dd)}
-          tone="negative"
-          sub={`Calmar ${num(Number(metrics?.calmar ?? 0))}`}
-        />
-        <KPI
-          label="Realised volatility"
-          value={pct(annVol)}
-          sub={`Hit rate ${pct(Number(metrics?.hit_rate ?? 0), 1)}`}
-        />
-      </div>
-
-      <Figure
-        number="1"
-        title="Equity curve"
-        caption={
-          <>
-            Cumulative growth of $1 invested at inception. Net of slippage (5–25 bps) and
-            commissions ($0.005/share, $1 minimum). Blue trace is the strategy; the dashed
-            reference is the starting capital baseline.
-          </>
-        }
-      >
-        <AcademicLine
-          data={eqData}
-          xKey="date"
-          yKeys={[{ key: "nav", color: "academic", label: "NAV" }]}
-          height={300}
-          fill
-          yFmt="money"
-          xFmt="YYYY-MM"
-        />
-      </Figure>
-
-      <div className="grid lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2">
-          <h4>II. Top positions, current snapshot</h4>
-          <PaperTable
-            number="1"
-            title="Largest holdings by market value"
-            caption={<>Includes both long and short legs. Weights calculated on portfolio NAV.</>}
-          >
-            <thead>
-              <tr>
-                <th>Ticker</th>
-                <th>Sector</th>
-                <th className="num">Weight</th>
-                <th className="num">Mkt&nbsp;Value</th>
-                <th className="num">Unrealized&nbsp;P/L</th>
-              </tr>
-            </thead>
-            <tbody>
-              {positions.slice(0, 12).map((p) => (
-                <tr key={p.ticker}>
-                  <td><Ticker symbol={p.ticker} /></td>
-                  <td className="text-muted text-small">{p.sector}</td>
-                  <td className="num">{pct(Number(p.weight))}</td>
-                  <td className="num">{money(Number(p.market_value))}</td>
-                  <td className={`num ${Number(p.unrealized_pnl) >= 0 ? "text-positive" : "text-negative"}`}>
-                    {signed(Number(p.unrealized_pnl) / 1000, 1)}K
-                  </td>
-                </tr>
-              ))}
-              {positions.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="caption">
-                    No live positions yet — bootstrap is still running.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </PaperTable>
+    <main className="min-h-screen flex flex-col items-center justify-center px-6 py-24">
+      <div className="w-full max-w-dashboard flex flex-col items-center">
+        {/* Hero: NAV + Day P&L */}
+        <BigStat label="NAV" value={fullMoney(navValue)} size="hero" />
+        <div className={`mt-4 flex items-center gap-2 ${dayTone === "positive" ? "text-[var(--positive)]" : dayTone === "negative" ? "text-[var(--negative)]" : "text-[var(--muted)]"}`}>
+          <PixelArrow direction={dayDirection} className="h-4 w-4" />
+          <span className="tabular font-mono text-lg">
+            {signed(navChange, 0) !== "—" ? `${navChange && navChange > 0 ? "+" : ""}${fullMoney(navChange)}` : "—"}
+          </span>
+          <span className="tabular font-mono text-lg text-[var(--muted)]">
+            ({dayReturnPct !== null ? signed(dayReturnPct * 100, 2) + "%" : "—"})
+          </span>
         </div>
 
-        <div>
-          <h4>III. Sector composition</h4>
-          <PaperTable number="2" title="Sector weight (long net)">
-            <thead>
-              <tr><th>Sector</th><th className="num">Weight</th><th className="num">N</th></tr>
-            </thead>
-            <tbody>
-              {sectors.slice(0, 12).map((s) => (
-                <tr key={s.sector}>
-                  <td className="text-small">{s.sector || "—"}</td>
-                  <td className="num">{pct(Number(s.weight))}</td>
-                  <td className="num text-muted">{s.count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </PaperTable>
+        {/* Secondary row: Sharpe, Drawdown, Ann. Return */}
+        <div className="mt-20 md:mt-24 grid grid-cols-1 md:grid-cols-3 gap-12 md:gap-16 w-full">
+          <BigStat
+            label="Sharpe (63d)"
+            value={num(sharpeCurr)}
+            delta={{
+              direction: sharpeDirection,
+              tone: sharpeTone,
+              label: sharpeChange !== null ? signed(sharpeChange, 2) : undefined,
+            }}
+          />
+          <BigStat
+            label="Drawdown"
+            value={pct(ddCurr, 1)}
+            delta={{
+              direction: ddDirection,
+              tone: ddTone,
+              label: ddChange !== null ? signed(ddChange * 100, 1) + "%" : undefined,
+            }}
+          />
+          <BigStat
+            label="Ann. Return (1y)"
+            value={pct(annReturn, 1)}
+            delta={{
+              direction: paceDirection,
+              tone: paceTone,
+            }}
+          />
         </div>
-      </div>
 
-      <div>
-        <h4>IV. Most recent executions</h4>
-        <PaperTable
-          number="3"
-          title="Trade tape (last 8)"
-          caption={
-            <>Slippage modelled as 5 bps base plus half-spread proxy and a 15 bps impact penalty above 1% ADV.</>
-          }
-        >
-          <thead>
-            <tr>
-              <th>When</th>
-              <th>Ticker</th>
-              <th>Side</th>
-              <th>Strategy</th>
-              <th className="num">Qty</th>
-              <th className="num">Price</th>
-              <th className="num">Slippage</th>
-            </tr>
-          </thead>
-          <tbody>
-            {trades.map((t, i) => (
-              <tr key={i}>
-                <td className="text-small text-muted">{String(t.executed_at).slice(0, 10)}</td>
-                <td><Ticker symbol={t.ticker} /></td>
-                <td className={t.side === "BUY" ? "text-positive" : "text-negative"}>{t.side}</td>
-                <td className="text-small text-muted italic">{t.strategy ?? "—"}</td>
-                <td className="num">{Number(t.quantity).toFixed(0)}</td>
-                <td className="num">${Number(t.price).toFixed(2)}</td>
-                <td className="num text-muted">{Number(t.slippage_bps).toFixed(1)} bp</td>
-              </tr>
-            ))}
-            {trades.length === 0 && (
-              <tr><td colSpan={7} className="caption">No trades yet.</td></tr>
-            )}
-          </tbody>
-        </PaperTable>
+        {asOf && (
+          <div className="mt-20 font-mono text-xs tracking-wide uppercase text-[var(--faint)]">
+            as of {asOf}
+          </div>
+        )}
       </div>
-
-      <div className="ornament"></div>
-    </div>
+    </main>
   );
 }
