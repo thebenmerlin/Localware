@@ -12,11 +12,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <div className="min-h-screen flex flex-col">
-          <header className="px-6 md:px-12 pt-10">
+          <header className="px-6 md:px-12 pt-12 flex justify-center">
             <Header />
           </header>
           <div className="flex-1 px-6 md:px-12 py-12">
-            <div className="max-w-dashboard">{children}</div>
+            <div className="max-w-dashboard mx-auto">{children}</div>
           </div>
         </div>
       </body>
