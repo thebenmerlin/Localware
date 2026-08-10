@@ -7,6 +7,21 @@ export interface LineChartPoint {
   value: number;
 }
 
+type ValueFormat = "money" | "percent" | "number";
+
+// Formatting lives here as plain data (a format "kind"), not function props —
+// Server Components can't pass functions to a "use client" component (they
+// aren't serializable across the RSC boundary), so callers pass a string enum.
+function formatValue(v: number, format: ValueFormat): string {
+  if (format === "money") return `$${v.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+  if (format === "percent") return `${v.toFixed(1)}%`;
+  return v.toFixed(2);
+}
+
+function formatDate(d: string): string {
+  return String(d).slice(0, 10);
+}
+
 /**
  * A single-series line chart: thin 2px stroke, hairline zero/baseline,
  * hover crosshair that snaps to the nearest point, end value direct-labeled.
@@ -16,15 +31,13 @@ export function LineChart({
   data,
   color,
   height = 220,
-  formatValue,
-  formatDate,
+  format = "number",
   zeroLine = false,
 }: {
   data: LineChartPoint[];
   color: string;
   height?: number;
-  formatValue: (v: number) => string;
-  formatDate: (d: string) => string;
+  format?: ValueFormat;
   zeroLine?: boolean;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -116,7 +129,7 @@ export function LineChart({
           fontFamily="JetBrains Mono, monospace"
           fill="var(--ink)"
         >
-          {formatValue(endDatum.value)}
+          {formatValue(endDatum.value, format)}
         </text>
 
         {hover && (
@@ -139,7 +152,7 @@ export function LineChart({
           className="absolute top-0 -translate-x-1/2 -translate-y-full bg-[var(--paper)] border border-[var(--faint)] rounded px-2 py-1 text-xs font-mono pointer-events-none"
           style={{ left: `${(hover.point.x / width) * 100}%` }}
         >
-          <div className="tabular font-semibold">{formatValue(hover.datum.value)}</div>
+          <div className="tabular font-semibold">{formatValue(hover.datum.value, format)}</div>
           <div className="text-[var(--muted)]">{formatDate(hover.datum.date)}</div>
         </div>
       )}

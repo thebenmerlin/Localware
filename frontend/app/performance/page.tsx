@@ -1,12 +1,7 @@
 import { getEquityCurve, getDrawdownSeries, getRollingSharpe } from "@/lib/queries";
 import { LineChart } from "@/components/LineChart";
-import { num } from "@/lib/format";
 
 export const revalidate = 600;
-
-function fmtDate(d: string) {
-  return String(d).slice(0, 10);
-}
 
 export default async function PerformancePage() {
   const [equity, drawdown, rollingSharpe] = await Promise.all([
@@ -34,12 +29,7 @@ export default async function PerformancePage() {
           Equity curve
         </h2>
         <div className="mt-4">
-          <LineChart
-            data={navSeries}
-            color="var(--positive)"
-            formatValue={(v) => `$${v.toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
-            formatDate={fmtDate}
-          />
+          <LineChart data={navSeries} color="var(--positive)" format="money" />
         </div>
       </section>
 
@@ -48,13 +38,7 @@ export default async function PerformancePage() {
           Drawdown from peak
         </h2>
         <div className="mt-4">
-          <LineChart
-            data={ddSeries}
-            color="var(--negative)"
-            formatValue={(v) => `${v.toFixed(1)}%`}
-            formatDate={fmtDate}
-            zeroLine
-          />
+          <LineChart data={ddSeries} color="var(--negative)" format="percent" zeroLine />
         </div>
       </section>
 
@@ -63,13 +47,7 @@ export default async function PerformancePage() {
           Rolling Sharpe (63d)
         </h2>
         <div className="mt-4">
-          <LineChart
-            data={sharpeSeries}
-            color="var(--ink)"
-            formatValue={(v) => num(v)}
-            formatDate={fmtDate}
-            zeroLine
-          />
+          <LineChart data={sharpeSeries} color="var(--ink)" format="number" zeroLine />
         </div>
       </section>
     </div>
