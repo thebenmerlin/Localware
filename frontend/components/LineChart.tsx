@@ -18,19 +18,49 @@ function formatValue(v: number, format: ValueFormat): string {
   return v.toFixed(2);
 }
 
+function formatAxisValue(v: number, format: ValueFormat): string {
+  if (format === "money") {
+    const abs = Math.abs(v);
+    if (abs >= 1e6) return `$${(v / 1e6).toFixed(1)}M`;
+    if (abs >= 1e3) return `$${(v / 1e3).toFixed(0)}K`;
+    return `$${v.toFixed(0)}`;
+  }
+  if (format === "percent") return `${v.toFixed(0)}%`;
+  return v.toFixed(1);
+}
+
 function formatDate(d: string): string {
-  return String(d).slice(0, 10);
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return String(d).slice(0, 10);
+  return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+/** Pick ~`count` evenly spaced "nice" values between min and max. */
+function niceTicks(min: number, max: number, count: number): number[] {
+  if (min === max) return [min];
+  const range = max - min;
+  const rawStep = range / count;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const residual = rawStep / magnitude;
+  const step = (residual >= 5 ? 10 : residual >= 2 ? 5 : residual >= 1 ? 2 : 1) * magnitude;
+  const start = Math.ceil(min / step) * step;
+  const ticks: number[] = [];
+  for (let v = start; v <= max + step * 1e-9; v += step) ticks.push(Math.round(v * 1e6) / 1e6);
+  return ticks;
 }
 
 /**
- * A single-series line chart: thin 2px stroke, hairline zero/baseline,
- * hover crosshair that snaps to the nearest point, end value direct-labeled.
- * One color in, one series shown — no legend needed per dataviz's single-series rule.
+ * A single-series line chart: thin 2px stroke, recessive hairline axes/
+ * gridlines, hover crosshair that snaps to the nearest point. The current
+ * value is never drawn inside the plot (it used to collide with the line
+ * near series highs) — callers show it in a header above the chart instead.
+ * One color in, one series shown — no legend needed per dataviz's
+ * single-series rule.
  */
 export function LineChart({
   data,
   color,
-  height = 220,
+  height = 240,
   format = "number",
   zeroLine = false,
   compact = false,
@@ -40,9 +70,9 @@ export function LineChart({
   height?: number;
   format?: ValueFormat;
   zeroLine?: boolean;
-  /** Thumbnail mode: no hover/tooltip, no end-label, tighter padding.
-   *  Meant to be glanced at inside a small card, not interacted with —
-   *  the card itself is the click target that opens the full chart. */
+  /** Thumbnail mode: no axes/hover/tooltip, tighter padding. Meant to be
+   *  glanced at inside a small card, not interacted with — the card itself
+   *  is the click target that opens the full chart. */
   compact?: boolean;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -50,16 +80,29 @@ export function LineChart({
   const width = 720;
   const padding = compact
     ? { top: 6, right: 4, bottom: 4, left: 4 }
-    : { top: 12, right: 8, bottom: 20, left: 8 };
+    : { top: 12, right: 16, bottom: 28, left: 56 };
 
-  const { path, area, points, yMin, yMax } = useMemo(() => {
+  const { path, area, points, yMin, yMax, yTicks, xTickIdx } = useMemo(() => {
     if (data.length === 0) {
-      return { path: "", area: "", points: [] as { x: number; y: number }[], yMin: 0, yMax: 0 };
+      return {
+        path: "",
+        area: "",
+        points: [] as { x: number; y: number }[],
+        yMin: 0,
+        yMax: 0,
+        yTicks: [] as number[],
+        xTickIdx: [] as number[],
+      };
     }
     const values = data.map((d) => d.value);
     let yMin = Math.min(...values);
     let yMax = Math.max(...values);
     if (zeroLine) yMin = Math.min(yMin, 0);
+    const yTicks = compact ? [] : niceTicks(yMin, yMax, 4);
+    if (yTicks.length) {
+      yMin = Math.min(yMin, yTicks[0]);
+      yMax = Math.max(yMax, yTicks[yTicks.length - 1]);
+    }
     if (yMin === yMax) {
       yMin -= 1;
       yMax += 1;
@@ -75,8 +118,16 @@ export function LineChart({
     const area =
       path +
       ` L${points[points.length - 1].x.toFixed(2)},${baseline} L${points[0].x.toFixed(2)},${baseline} Z`;
-    return { path, area, points, yMin, yMax };
-  }, [data, height, zeroLine]);
+
+    // Up to 5 evenly spaced x-axis labels, always including first/last.
+    const xTickCount = Math.min(5, data.length);
+    const xTickIdx =
+      xTickCount <= 1
+        ? [0]
+        : Array.from({ length: xTickCount }, (_, i) => Math.round((i * (data.length - 1)) / (xTickCount - 1)));
+
+    return { path, area, points, yMin, yMax, yTicks, xTickIdx };
+  }, [data, height, zeroLine, compact, padding.left, padding.right, padding.top, padding.bottom]);
 
   function handleMove(e: React.PointerEvent<SVGSVGElement>) {
     if (compact || !svgRef.current || points.length === 0) return;
@@ -99,8 +150,8 @@ export function LineChart({
   }
 
   const hover = hoverIdx !== null ? { point: points[hoverIdx], datum: data[hoverIdx] } : null;
-  const endPoint = points[points.length - 1];
-  const endDatum = data[data.length - 1];
+  const innerH = height - padding.top - padding.bottom;
+  const yToPx = (v: number) => padding.top + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
 
   return (
     <div className="relative w-full">
@@ -111,12 +162,40 @@ export function LineChart({
         onPointerMove={handleMove}
         onPointerLeave={() => setHoverIdx(null)}
       >
+        {/* y-axis gridlines + ticks */}
+        {!compact &&
+          yTicks.map((t) => (
+            <g key={t}>
+              <line
+                x1={padding.left}
+                x2={width - padding.right}
+                y1={yToPx(t)}
+                y2={yToPx(t)}
+                stroke="var(--faint)"
+                strokeOpacity={0.3}
+                strokeWidth={1}
+              />
+              <text
+                x={padding.left - 8}
+                y={yToPx(t)}
+                textAnchor="end"
+                dominantBaseline="middle"
+                className="tabular"
+                fontSize={11}
+                fontFamily="JetBrains Mono, monospace"
+                fill="var(--muted)"
+              >
+                {formatAxisValue(t, format)}
+              </text>
+            </g>
+          ))}
+
         {zeroLine && yMin < 0 && yMax > 0 && (
           <line
             x1={padding.left}
             x2={width - padding.right}
-            y1={padding.top + (height - padding.top - padding.bottom) * (yMax / (yMax - yMin))}
-            y2={padding.top + (height - padding.top - padding.bottom) * (yMax / (yMax - yMin))}
+            y1={yToPx(0)}
+            y2={yToPx(0)}
             stroke="var(--faint)"
             strokeWidth={1}
           />
@@ -132,23 +211,21 @@ export function LineChart({
           strokeLinecap="round"
         />
 
-        {/* end marker + direct label */}
-        {!compact && (
-          <>
-            <circle cx={endPoint.x} cy={endPoint.y} r={4} fill={color} stroke="var(--paper)" strokeWidth={2} />
+        {/* x-axis date ticks */}
+        {!compact &&
+          xTickIdx.map((i) => (
             <text
-              x={endPoint.x}
-              y={endPoint.y - 10}
-              textAnchor="end"
-              className="tabular"
-              fontSize={12}
+              key={i}
+              x={points[i].x}
+              y={height - padding.bottom + 16}
+              textAnchor={i === 0 ? "start" : i === data.length - 1 ? "end" : "middle"}
+              fontSize={11}
               fontFamily="JetBrains Mono, monospace"
-              fill="var(--ink)"
+              fill="var(--muted)"
             >
-              {formatValue(endDatum.value, format)}
+              {formatDate(data[i].date)}
             </text>
-          </>
-        )}
+          ))}
 
         {hover && (
           <>
