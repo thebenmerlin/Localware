@@ -33,17 +33,24 @@ export function LineChart({
   height = 220,
   format = "number",
   zeroLine = false,
+  compact = false,
 }: {
   data: LineChartPoint[];
   color: string;
   height?: number;
   format?: ValueFormat;
   zeroLine?: boolean;
+  /** Thumbnail mode: no hover/tooltip, no end-label, tighter padding.
+   *  Meant to be glanced at inside a small card, not interacted with —
+   *  the card itself is the click target that opens the full chart. */
+  compact?: boolean;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const width = 720;
-  const padding = { top: 12, right: 8, bottom: 20, left: 8 };
+  const padding = compact
+    ? { top: 6, right: 4, bottom: 4, left: 4 }
+    : { top: 12, right: 8, bottom: 20, left: 8 };
 
   const { path, area, points, yMin, yMax } = useMemo(() => {
     if (data.length === 0) {
@@ -72,7 +79,7 @@ export function LineChart({
   }, [data, height, zeroLine]);
 
   function handleMove(e: React.PointerEvent<SVGSVGElement>) {
-    if (!svgRef.current || points.length === 0) return;
+    if (compact || !svgRef.current || points.length === 0) return;
     const rect = svgRef.current.getBoundingClientRect();
     const px = ((e.clientX - rect.left) / rect.width) * width;
     let nearest = 0;
@@ -116,21 +123,32 @@ export function LineChart({
         )}
 
         <path d={area} fill={color} opacity={0.08} stroke="none" />
-        <path d={path} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+        <path
+          d={path}
+          fill="none"
+          stroke={color}
+          strokeWidth={compact ? 1.5 : 2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
 
         {/* end marker + direct label */}
-        <circle cx={endPoint.x} cy={endPoint.y} r={4} fill={color} stroke="var(--paper)" strokeWidth={2} />
-        <text
-          x={endPoint.x}
-          y={endPoint.y - 10}
-          textAnchor="end"
-          className="tabular"
-          fontSize={12}
-          fontFamily="JetBrains Mono, monospace"
-          fill="var(--ink)"
-        >
-          {formatValue(endDatum.value, format)}
-        </text>
+        {!compact && (
+          <>
+            <circle cx={endPoint.x} cy={endPoint.y} r={4} fill={color} stroke="var(--paper)" strokeWidth={2} />
+            <text
+              x={endPoint.x}
+              y={endPoint.y - 10}
+              textAnchor="end"
+              className="tabular"
+              fontSize={12}
+              fontFamily="JetBrains Mono, monospace"
+              fill="var(--ink)"
+            >
+              {formatValue(endDatum.value, format)}
+            </text>
+          </>
+        )}
 
         {hover && (
           <>
