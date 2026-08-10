@@ -1,6 +1,6 @@
 export default function Loading() {
   return (
-    <div className="animate-pulse">
+    <div className="max-w-dashboard animate-pulse">
       <div className="h-4 w-16 rounded bg-[var(--faint)] opacity-30" />
       <div className="mt-4 h-24 md:h-32 w-2/3 rounded bg-[var(--faint)] opacity-20" />
       <div className="mt-6 h-5 w-40 rounded bg-[var(--faint)] opacity-20" />

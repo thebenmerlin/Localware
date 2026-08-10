@@ -7,7 +7,7 @@ export default async function PositionsPage() {
   const [positions, sectors] = await Promise.all([getCurrentPositions(), getSectorExposure()]);
 
   return (
-    <div className="flex flex-col gap-16">
+    <div className="max-w-dashboard flex flex-col gap-16">
       <section>
         <h2 className="font-mono text-[0.7rem] tracking-[0.18em] uppercase text-[var(--muted)]">
           Holdings

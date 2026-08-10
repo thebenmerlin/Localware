@@ -19,6 +19,7 @@ const config: Config = {
       },
       maxWidth: {
         dashboard: "56rem",
+        wide: "72rem",
       },
     },
   },

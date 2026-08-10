@@ -23,7 +23,7 @@ export default async function PerformancePage() {
     .map((r) => ({ date: r.date, value: Number(r.sharpe) }));
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+    <div className="max-w-wide grid grid-cols-1 sm:grid-cols-3 gap-8 lg:gap-10">
       <ChartCard title="Equity curve" data={navSeries} color="var(--positive)" format="money" />
       <ChartCard title="Drawdown from peak" data={ddSeries} color="var(--negative)" format="percent" zeroLine />
       <ChartCard title="Rolling Sharpe (63d)" data={sharpeSeries} color="var(--ink)" format="number" zeroLine />

@@ -2,7 +2,7 @@
 
 export default function Error({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
   return (
-    <div>
+    <div className="max-w-dashboard">
       <div className="font-display text-2xl">Couldn't load latest figures.</div>
       <button
         onClick={() => reset()}

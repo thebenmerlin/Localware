@@ -64,22 +64,26 @@ export function LineChart({
   format = "number",
   zeroLine = false,
   compact = false,
+  interactive = true,
 }: {
   data: LineChartPoint[];
   color: string;
   height?: number;
   format?: ValueFormat;
   zeroLine?: boolean;
-  /** Thumbnail mode: no axes/hover/tooltip, tighter padding. Meant to be
-   *  glanced at inside a small card, not interacted with — the card itself
-   *  is the click target that opens the full chart. */
+  /** Compact mode: no axis ticks/gridlines, tighter padding, thinner
+   *  stroke — for a card-sized preview. Hover/drag scrubbing still works
+   *  by default (see `interactive`) so values are readable without
+   *  opening anything bigger. */
   compact?: boolean;
+  /** Set false only for a truly static, non-scrubbable preview. */
+  interactive?: boolean;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const width = 720;
   const padding = compact
-    ? { top: 6, right: 4, bottom: 4, left: 4 }
+    ? { top: 16, right: 4, bottom: 4, left: 4 }
     : { top: 12, right: 16, bottom: 28, left: 56 };
 
   const { path, area, points, yMin, yMax, yTicks, xTickIdx } = useMemo(() => {
@@ -130,7 +134,7 @@ export function LineChart({
   }, [data, height, zeroLine, compact, padding.left, padding.right, padding.top, padding.bottom]);
 
   function handleMove(e: React.PointerEvent<SVGSVGElement>) {
-    if (compact || !svgRef.current || points.length === 0) return;
+    if (!interactive || !svgRef.current || points.length === 0) return;
     const rect = svgRef.current.getBoundingClientRect();
     const px = ((e.clientX - rect.left) / rect.width) * width;
     let nearest = 0;
@@ -159,7 +163,9 @@ export function LineChart({
         ref={svgRef}
         viewBox={`0 0 ${width} ${height}`}
         className="w-full h-auto"
+        style={{ touchAction: interactive ? "none" : undefined }}
         onPointerMove={handleMove}
+        onPointerDown={handleMove}
         onPointerLeave={() => setHoverIdx(null)}
       >
         {/* y-axis gridlines + ticks */}
@@ -244,8 +250,14 @@ export function LineChart({
 
       {hover && (
         <div
-          className="absolute top-0 -translate-x-1/2 -translate-y-full bg-[var(--paper)] border border-[var(--faint)] rounded px-2 py-1 text-xs font-mono pointer-events-none"
-          style={{ left: `${(hover.point.x / width) * 100}%` }}
+          className="absolute bg-[var(--paper)] border border-[var(--faint)] rounded px-2 py-1 text-xs font-mono pointer-events-none whitespace-nowrap"
+          style={{
+            left: `${(hover.point.x / width) * 100}%`,
+            top: `${(Math.max(hover.point.y, (compact ? padding.top : padding.top) + 6) / height) * 100}%`,
+            transform: `translateX(${
+              hover.point.x < width * 0.12 ? "0%" : hover.point.x > width * 0.88 ? "-100%" : "-50%"
+            }) translateY(calc(-100% - 8px))`,
+          }}
         >
           <div className="tabular font-semibold">{formatValue(hover.datum.value, format)}</div>
           <div className="text-[var(--muted)]">{formatDate(hover.datum.date)}</div>

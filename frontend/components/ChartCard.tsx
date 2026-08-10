@@ -12,10 +12,12 @@ function formatCurrent(v: number, format: Format): string {
 }
 
 /**
- * A minimal bordered box holding a small, non-interactive chart preview.
- * The current value sits in its own header row — never inside the plot,
- * so it can't collide with the line near a series high/low.
- * Clicking the card opens a full-size version in a centered modal.
+ * A minimal bordered box holding a scrubbable chart preview — dragging your
+ * pointer across it reads out values directly, no popup needed. The current
+ * value sits in its own header row, never inside the plot, so it can't
+ * collide with the line near a series high/low. An explicit expand button
+ * (not the chart itself) opens a full-size version in a centered modal —
+ * scrubbing the mini chart never triggers it.
  */
 export function ChartCard({
   title,
@@ -44,23 +46,31 @@ export function ChartCard({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setExpanded(true)}
-        className="text-left w-full rounded-lg border border-[var(--faint)]/30 px-5 py-5 transition-colors hover:border-[var(--faint)]/60"
-      >
-        <div className="font-mono text-[0.65rem] tracking-[0.14em] uppercase text-[var(--muted)]">
-          {title}
-        </div>
-        {current !== null && (
-          <div className="tabular font-display text-2xl font-semibold mt-1" style={{ color }}>
-            {formatCurrent(current, format)}
+      <div className="group relative w-full rounded-lg border border-[var(--faint)]/30 px-5 py-5 transition-colors hover:border-[var(--faint)]/60">
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="font-mono text-[0.65rem] tracking-[0.14em] uppercase text-[var(--muted)]">
+              {title}
+            </div>
+            {current !== null && (
+              <div className="tabular font-display text-2xl font-semibold mt-1" style={{ color }}>
+                {formatCurrent(current, format)}
+              </div>
+            )}
           </div>
-        )}
-        <div className="mt-4">
-          <LineChart data={data} color={color} format={format} zeroLine={zeroLine} height={64} compact />
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            aria-label={`Expand ${title}`}
+            className="shrink-0 font-mono text-xs text-[var(--faint)] opacity-0 group-hover:opacity-100 transition-opacity hover:text-[var(--ink)]"
+          >
+            expand ↗
+          </button>
         </div>
-      </button>
+        <div className="mt-4">
+          <LineChart data={data} color={color} format={format} zeroLine={zeroLine} height={110} compact />
+        </div>
+      </div>
 
       {expanded && (
         <div

@@ -77,7 +77,7 @@ export default async function Page() {
   const asOf = nav?.date ? String(nav.date).slice(0, 10) : null;
 
   return (
-    <div>
+    <div className="max-w-dashboard">
       {/* Hero: NAV + Day P&L */}
       <BigStat label="NAV" value={fullMoney(navValue)} size="hero" />
       <div className={`mt-4 flex items-center gap-2 ${dayTone === "positive" ? "text-[var(--positive)]" : dayTone === "negative" ? "text-[var(--negative)]" : "text-[var(--muted)]"}`}>
