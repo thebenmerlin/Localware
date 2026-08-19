@@ -37,6 +37,18 @@ function toneOf(row: HoldingRow) {
   return { pnlPct, color: pnlPct >= 0 ? "var(--positive)" : "var(--negative)", opacity: 0.16 + intensity * 0.55 };
 }
 
+// Largest font (px) that fits `text` in a `widthPx` x `heightPx` box, down to
+// MIN_FONT_PX — below that a label just isn't readable, so the tile goes
+// unlabeled rather than rendering illegible text. JetBrains Mono runs about
+// 0.62em per character; 0.62 * heightPx approximates "font fits one line."
+const MIN_FONT_PX = 5;
+const MAX_FONT_PX = 11;
+function fitFontPx(text: string, widthPx: number, heightPx: number): number {
+  const byWidth = widthPx / (text.length * 0.62 + 0.3);
+  const byHeight = heightPx * 0.62;
+  return Math.floor(Math.min(MAX_FONT_PX, byWidth, byHeight));
+}
+
 /**
  * One sector's tiles, laid out against this component's *own* measured
  * pixel size (ResizeObserver) rather than a shared global virtual box.
@@ -92,34 +104,57 @@ function SectorMap({
         if (!row) return null;
         const realW = t.w * scale;
         const realH = t.h * scale;
-        const showTicker = scale > 0 && realW >= 32 && realH >= 15;
-        const showWeight = scale > 0 && realW >= 46 && realH >= 30;
+        const innerW = Math.max(0, realW - 5);
+        const innerH = Math.max(0, realH - 4);
+        const tickerFontPx = scale > 0 ? fitFontPx(row.ticker, innerW, innerH) : 0;
+        const showTicker = tickerFontPx >= MIN_FONT_PX;
+        const weightText = pct(row.weight, 1);
+        const weightFontPx = Math.max(MIN_FONT_PX, tickerFontPx - 2);
+        const showWeight =
+          showTicker &&
+          tickerFontPx >= 7 &&
+          innerH >= tickerFontPx + weightFontPx + 3 &&
+          innerW >= weightText.length * weightFontPx * 0.62;
         const tone = toneOf(row);
         return (
           <div
             key={row.ticker}
-            className="absolute flex flex-col items-start justify-start overflow-hidden border border-[var(--paper)] px-1.5 py-1 cursor-pointer transition-[filter] hover:brightness-110"
+            className="group absolute overflow-hidden border border-[var(--paper)] cursor-pointer"
             style={{
               left: `${(t.x / localW) * 100}%`,
               top: `${(t.y / localH) * 100}%`,
               width: `${(t.w / localW) * 100}%`,
               height: `${(t.h / localH) * 100}%`,
-              background: tone.color,
-              opacity: tone.opacity,
             }}
             onMouseEnter={(e) => onTileEnter(row.ticker, e)}
             onMouseMove={onTileMove}
             onMouseLeave={onTileLeave}
             onClick={() => onTileClick(row)}
           >
-            {showTicker && (
-              <span className="tabular font-mono text-[0.68rem] font-semibold text-[var(--ink)]">
-                {row.ticker}
-              </span>
-            )}
-            {showWeight && (
-              <span className="tabular font-mono text-[0.6rem] text-[var(--ink)]/70">{pct(row.weight, 1)}</span>
-            )}
+            {/* Separate layer for the P/L color so its opacity never fades
+                the ticker/weight text sitting on top of it. */}
+            <div
+              className="absolute inset-0 transition-[filter] group-hover:brightness-110"
+              style={{ background: tone.color, opacity: tone.opacity }}
+            />
+            <div className="relative flex flex-col items-start justify-start px-1.5 py-1 h-full">
+              {showTicker && (
+                <span
+                  className="tabular font-mono font-semibold leading-none text-[var(--ink)] whitespace-nowrap"
+                  style={{ fontSize: `${tickerFontPx}px` }}
+                >
+                  {row.ticker}
+                </span>
+              )}
+              {showWeight && (
+                <span
+                  className="tabular font-mono leading-none text-[var(--ink)]/70 whitespace-nowrap mt-0.5"
+                  style={{ fontSize: `${weightFontPx}px` }}
+                >
+                  {weightText}
+                </span>
+              )}
+            </div>
           </div>
         );
       })}
