@@ -15,7 +15,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="terminal"]) {
+  :root {
     --paper: #111110;
     --ink: #f2f1ec;
     --muted: #8c8b83;
@@ -24,18 +24,6 @@
     --negative: #f0716a;
     --accent: #e0b34d;
   }
-}
-
-/* Manually-toggled CRT/phosphor theme — see components/ThemeToggle.tsx.
-   Independent of prefers-color-scheme so it always wins when set. */
-:root[data-theme="terminal"] {
-  --paper: #05100a;
-  --ink: #4dffa0;
-  --muted: #339e69;
-  --faint: #1d5c40;
-  --positive: #7dffc4;
-  --negative: #ff6b5e;
-  --accent: #ffb347;
 }
 
 * {
@@ -56,61 +44,9 @@ body {
   transition: background-color 0.25s ease, color 0.25s ease;
 }
 
-:root[data-theme="terminal"] body {
-  font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
-}
-
-/* Headings/values opt into the serif via Tailwind's `font-display` utility,
-   which otherwise out-specifies the body-level swap above. A CRT doesn't
-   render serif type, so terminal mode wins here too. */
-:root[data-theme="terminal"] .font-display {
-  font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
-}
-
-/* Faint CRT scanlines, terminal mode only — decorative, never intercepts input. */
-:root[data-theme="terminal"] body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  background: repeating-linear-gradient(
-    to bottom,
-    rgba(0, 0, 0, 0.22) 0px,
-    rgba(0, 0, 0, 0.22) 1px,
-    transparent 1px,
-    transparent 3px
-  );
-  mix-blend-mode: overlay;
-  opacity: 0.55;
-}
-
 .tabular {
   font-variant-numeric: tabular-nums lining-nums;
   font-feature-settings: "tnum" 1, "lnum" 1;
-}
-
-/* Text glow — inert by default, lit up only in terminal mode so serif/dark
-   themes never get a haze that wasn't designed for them. */
-.glow-text {
-  text-shadow: none;
-}
-:root[data-theme="terminal"] .glow-text {
-  text-shadow: 0 0 10px currentColor, 0 0 3px currentColor;
-}
-
-.terminal-cursor::after {
-  content: "";
-}
-:root[data-theme="terminal"] .terminal-cursor::after {
-  content: "_";
-  margin-left: 2px;
-  animation: blink 1s steps(1) infinite;
-}
-@keyframes blink {
-  50% {
-    opacity: 0;
-  }
 }
 
 /* Soft ambient hover glow for card surfaces. */
@@ -119,9 +55,6 @@ body {
 }
 .hover-glow:hover {
   box-shadow: 0 0 28px -10px var(--ink);
-}
-:root[data-theme="terminal"] .hover-glow:hover {
-  box-shadow: 0 0 32px -6px var(--positive);
 }
 
 /* Line-chart draw-in: paired with pathLength={1000} on the <path>. */
@@ -141,8 +74,5 @@ body {
   .chart-draw-in {
     animation: none;
     stroke-dashoffset: 0;
-  }
-  .terminal-cursor::after {
-    animation: none;
   }
 }

@@ -14,8 +14,8 @@ interface Particle {
 /**
  * A sparse field of slow-drifting dots behind the page content, fixed to
  * the viewport. Color is read from `--faint` so it stays in gamut across
- * light/dark/terminal without per-theme branching. Static (single paint,
- * no rAF loop) under prefers-reduced-motion.
+ * light/dark without per-theme branching. Static (single paint, no rAF
+ * loop) under prefers-reduced-motion.
  */
 export function Particles() {
   const canvasRef = useRef<HTMLCanvasElement>(null);

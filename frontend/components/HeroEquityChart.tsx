@@ -39,7 +39,7 @@ export function HeroEquityChart({
             Equity curve
           </div>
           <div
-            className="glow-text tabular font-display text-4xl md:text-5xl font-semibold mt-1"
+            className="tabular font-display text-4xl md:text-5xl font-semibold mt-1"
             style={{ color: "var(--positive)" }}
           >
             {fullMoney(currentNav)}

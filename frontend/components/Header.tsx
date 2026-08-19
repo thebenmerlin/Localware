@@ -42,7 +42,7 @@ export function Header() {
         type="button"
         onClick={() => setOpen((o) => !o)}
         onMouseEnter={() => setOpen(true)}
-        className="terminal-cursor font-display text-3xl md:text-4xl tracking-tight text-[var(--ink)] cursor-default"
+        className="font-display text-3xl md:text-4xl tracking-tight text-[var(--ink)] cursor-default"
         aria-expanded={open}
         aria-haspopup="true"
       >
