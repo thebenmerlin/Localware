@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { squarify, type TreemapRect } from "@/lib/treemap";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { squarify } from "@/lib/treemap";
 import { pct, money } from "@/lib/format";
+import { Sparkline } from "./Sparkline";
+import { StockDetailModal } from "./StockDetailModal";
 
 export interface HoldingRow {
   ticker: string;
@@ -11,101 +13,164 @@ export interface HoldingRow {
   weight: number;
   market_value: number;
   unrealized_pnl: number;
+  quantity: number;
+  avg_cost: number;
 }
 
 type PricePoint = { date: string; close: number };
 type PriceEntry = PricePoint[] | "loading" | "error";
 
-// Virtual coordinate system the layout is computed in, then rendered as
-// percentages — keeps the map responsive without a ResizeObserver.
+// Virtual coordinate system the sector *blocks* are arranged in (not the
+// tiles inside them — see SectorMap, which measures its own real size).
 const W = 1000;
 const H = 560;
+const SECTOR_LABEL_H = 22;
 const SECTOR_PAD = 4;
-const SECTOR_LABEL_H = 26;
 
 // Return-on-position (not raw $ P/L) drives tile color, so a big position
 // with a small gain doesn't out-glow a small position with a big one.
 const PNL_SATURATION_CAP = 0.15;
 
-const SPARK_W = 140;
-const SPARK_H = 40;
-
-function Sparkline({ points, color }: { points: PricePoint[]; color: string }) {
-  if (points.length < 2) {
-    return (
-      <div
-        style={{ width: SPARK_W, height: SPARK_H }}
-        className="flex items-center justify-center text-[10px] text-[var(--muted)] font-mono"
-      >
-        not enough data
-      </div>
-    );
-  }
-  const values = points.map((p) => p.close);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const step = SPARK_W / (points.length - 1);
-  const coords = points.map((p, i) => ({ x: i * step, y: SPARK_H - ((p.close - min) / range) * SPARK_H }));
-  const path = coords.map((c, i) => `${i === 0 ? "M" : "L"}${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(" ");
-  const area = `${path} L${coords[coords.length - 1].x.toFixed(1)},${SPARK_H} L0,${SPARK_H} Z`;
-  return (
-    <svg width={SPARK_W} height={SPARK_H} viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}>
-      <path d={area} fill={color} opacity={0.14} stroke="none" />
-      <path d={path} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
-    </svg>
-  );
+function toneOf(row: HoldingRow) {
+  const pnlPct = row.market_value !== 0 ? row.unrealized_pnl / Math.abs(row.market_value) : 0;
+  const intensity = Math.min(1, Math.abs(pnlPct) / PNL_SATURATION_CAP);
+  return { pnlPct, color: pnlPct >= 0 ? "var(--positive)" : "var(--negative)", opacity: 0.16 + intensity * 0.55 };
 }
 
-interface SectorLayout {
-  sector: string;
-  rect: TreemapRect;
-  tiles: (TreemapRect & { row: HoldingRow })[];
+/**
+ * One sector's tiles, laid out against this component's *own* measured
+ * pixel size (ResizeObserver) rather than a shared global virtual box.
+ * That's what makes ticker labels show up correctly regardless of how many
+ * positions there are or how big the container ends up being — a fixed
+ * area-ratio threshold (the old approach) breaks down once a sector has
+ * hundreds of names, since every tile ends up tiny relative to the whole.
+ * Used both inline (small, in the compact grid) and full-size (in the
+ * expanded-sector modal) — same component, just a differently sized parent.
+ */
+function SectorMap({
+  rows,
+  onTileEnter,
+  onTileMove,
+  onTileLeave,
+  onTileClick,
+}: {
+  rows: HoldingRow[];
+  onTileEnter: (ticker: string, e: React.MouseEvent) => void;
+  onTileMove: (e: React.MouseEvent) => void;
+  onTileLeave: () => void;
+  onTileClick: (row: HoldingRow) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState({ w: 0, h: 0 });
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect;
+      setBox({ w: width, h: height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const localW = 1000;
+  const localH = box.w > 0 ? Math.max(1, localW * (box.h / box.w)) : 560;
+  const scale = box.w > 0 ? box.w / localW : 0;
+
+  const tiles = useMemo(() => {
+    const items = rows.map((r) => ({ id: r.ticker, value: Math.abs(r.weight) }));
+    return squarify(items, 0, 0, localW, localH);
+  }, [rows, localH]);
+
+  const byTicker = useMemo(() => new Map(rows.map((r) => [r.ticker, r])), [rows]);
+
+  return (
+    <div ref={containerRef} className="relative w-full h-full">
+      {tiles.map((t) => {
+        const row = byTicker.get(t.id);
+        if (!row) return null;
+        const realW = t.w * scale;
+        const realH = t.h * scale;
+        const showTicker = scale > 0 && realW >= 32 && realH >= 15;
+        const showWeight = scale > 0 && realW >= 46 && realH >= 30;
+        const tone = toneOf(row);
+        return (
+          <div
+            key={row.ticker}
+            className="absolute flex flex-col items-start justify-start overflow-hidden border border-[var(--paper)] px-1.5 py-1 cursor-pointer transition-[filter] hover:brightness-110"
+            style={{
+              left: `${(t.x / localW) * 100}%`,
+              top: `${(t.y / localH) * 100}%`,
+              width: `${(t.w / localW) * 100}%`,
+              height: `${(t.h / localH) * 100}%`,
+              background: tone.color,
+              opacity: tone.opacity,
+            }}
+            onMouseEnter={(e) => onTileEnter(row.ticker, e)}
+            onMouseMove={onTileMove}
+            onMouseLeave={onTileLeave}
+            onClick={() => onTileClick(row)}
+          >
+            {showTicker && (
+              <span className="tabular font-mono text-[0.68rem] font-semibold text-[var(--ink)]">
+                {row.ticker}
+              </span>
+            )}
+            {showWeight && (
+              <span className="tabular font-mono text-[0.6rem] text-[var(--ink)]/70">{pct(row.weight, 1)}</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 /**
  * The whole book as a squarified treemap: sector blocks sized by gross
  * sector weight, position tiles inside sized by gross position weight and
- * colored by return. Hovering a tile opens a 30-day sparkline that tracks
- * the pointer, matching the old table's hover behavior.
+ * colored by return. Hover opens a 30-day sparkline + key figures that
+ * track the pointer; click a tile for the full detail modal, or click a
+ * sector's name to expand just that sector so small tiles are legible.
  */
 export function PositionsTreemap({ positions }: { positions: HoldingRow[] }) {
   const [hoverTicker, setHoverTicker] = useState<string | null>(null);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [prices, setPrices] = useState<Record<string, PriceEntry>>({});
+  const [expandedSector, setExpandedSector] = useState<string | null>(null);
+  const [detailRow, setDetailRow] = useState<HoldingRow | null>(null);
 
-  const layout = useMemo<SectorLayout[]>(() => {
-    const bySector = new Map<string, HoldingRow[]>();
+  const bySector = useMemo(() => {
+    const m = new Map<string, HoldingRow[]>();
     for (const p of positions) {
       const key = p.sector || "—";
-      if (!bySector.has(key)) bySector.set(key, []);
-      bySector.get(key)!.push(p);
+      if (!m.has(key)) m.set(key, []);
+      m.get(key)!.push(p);
     }
+    return m;
+  }, [positions]);
 
-    const sectorItems = Array.from(bySector.entries()).map(([sector, rows]) => ({
+  const sectorRects = useMemo(() => {
+    const items = Array.from(bySector.entries()).map(([sector, rows]) => ({
       id: sector,
       value: rows.reduce((s, r) => s + Math.abs(r.weight), 0),
     }));
-    const sectorRects = squarify(sectorItems, 0, 0, W, H);
+    return squarify(items, 0, 0, W, H);
+  }, [bySector]);
 
-    return sectorRects.map((rect) => {
-      const rows = bySector.get(rect.id)!;
-      const innerX = rect.x + SECTOR_PAD;
-      const innerY = rect.y + SECTOR_LABEL_H;
-      const innerW = Math.max(0, rect.w - SECTOR_PAD * 2);
-      const innerH = Math.max(0, rect.h - SECTOR_LABEL_H - SECTOR_PAD);
-      const tileItems = rows.map((r) => ({ id: r.ticker, value: Math.abs(r.weight) }));
-      const tileRects = squarify(tileItems, innerX, innerY, innerW, innerH);
-      const rowByTicker = new Map(rows.map((r) => [r.ticker, r]));
-      return {
-        sector: rect.id,
-        rect,
-        tiles: tileRects.map((t) => ({ ...t, row: rowByTicker.get(t.id)! })),
-      };
-    });
-  }, [positions]);
+  useEffect(() => {
+    if (!expandedSector) return;
+    // Detail modal renders on top when both are open — let its own Escape
+    // handler close that first, so Escape unwinds one layer at a time.
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && !detailRow) setExpandedSector(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expandedSector, detailRow]);
 
-  function handleEnter(ticker: string, e: React.MouseEvent) {
+  function handleTileEnter(ticker: string, e: React.MouseEvent) {
     setHoverTicker(ticker);
     setPos({ x: e.clientX, y: e.clientY });
     if (prices[ticker]) return;
@@ -115,22 +180,31 @@ export function PositionsTreemap({ positions }: { positions: HoldingRow[] }) {
       .then((data) => setPrices((p) => ({ ...p, [ticker]: [...data].reverse() })))
       .catch(() => setPrices((p) => ({ ...p, [ticker]: "error" })));
   }
-
-  function handleMove(e: React.MouseEvent) {
+  function handleTileMove(e: React.MouseEvent) {
     setPos({ x: e.clientX, y: e.clientY });
   }
+  function handleTileLeave() {
+    setHoverTicker(null);
+  }
+  function handleTileClick(row: HoldingRow) {
+    setHoverTicker(null);
+    setDetailRow(row);
+  }
 
+  const hoverRow = hoverTicker ? positions.find((p) => p.ticker === hoverTicker) ?? null : null;
   const hoverData = hoverTicker ? prices[hoverTicker] : undefined;
-  const tooltipLeft = hoverTicker ? Math.min(pos.x + 18, (typeof window !== "undefined" ? window.innerWidth : 1200) - 190) : 0;
-  const tooltipTop = hoverTicker ? Math.min(pos.y + 18, (typeof window !== "undefined" ? window.innerHeight : 800) - 130) : 0;
+  const viewportW = typeof window !== "undefined" ? window.innerWidth : 1200;
+  const viewportH = typeof window !== "undefined" ? window.innerHeight : 800;
+  const tooltipLeft = hoverTicker ? Math.min(pos.x + 18, viewportW - 210) : 0;
+  const tooltipTop = hoverTicker ? Math.min(pos.y + 18, viewportH - 210) : 0;
 
   return (
     <div>
       <div className="relative w-full" style={{ aspectRatio: `${W} / ${H}` }}>
-        {layout.map(({ sector, rect, tiles }) => (
+        {sectorRects.map((rect) => (
           <div
-            key={sector}
-            className="absolute"
+            key={rect.id}
+            className="absolute flex flex-col"
             style={{
               left: `${(rect.x / W) * 100}%`,
               top: `${(rect.y / H) * 100}%`,
@@ -138,81 +212,50 @@ export function PositionsTreemap({ positions }: { positions: HoldingRow[] }) {
               height: `${(rect.h / H) * 100}%`,
             }}
           >
-            <div className="absolute inset-x-0 top-0 truncate px-1 font-mono text-[0.62rem] tracking-[0.1em] uppercase text-[var(--muted)]">
-              {sector}
+            <button
+              type="button"
+              onClick={() => setExpandedSector(rect.id)}
+              title={`Expand ${rect.id}`}
+              className="shrink-0 truncate px-0.5 pb-1 text-left font-mono text-[0.62rem] tracking-[0.1em] uppercase text-[var(--muted)] hover:text-[var(--ink)] hover:underline decoration-dotted underline-offset-2"
+              style={{ height: SECTOR_LABEL_H }}
+            >
+              {rect.id}
+            </button>
+            <div className="relative flex-1 min-h-0" style={{ margin: `0 ${SECTOR_PAD}px ${SECTOR_PAD}px 0` }}>
+              <SectorMap
+                rows={bySector.get(rect.id) ?? []}
+                onTileEnter={handleTileEnter}
+                onTileMove={handleTileMove}
+                onTileLeave={handleTileLeave}
+                onTileClick={handleTileClick}
+              />
             </div>
-            {tiles.map(({ x, y, w, h, row }) => {
-              const area = w * h;
-              const showTicker = area / (W * H) > 0.007;
-              const showWeight = area / (W * H) > 0.02;
-              const pnlPct = row.market_value !== 0 ? row.unrealized_pnl / Math.abs(row.market_value) : 0;
-              const intensity = Math.min(1, Math.abs(pnlPct) / PNL_SATURATION_CAP);
-              const tone = pnlPct >= 0 ? "var(--positive)" : "var(--negative)";
-              return (
-                <div
-                  key={row.ticker}
-                  className="absolute flex flex-col items-start justify-start overflow-hidden border border-[var(--paper)] px-1.5 py-1 cursor-default transition-[filter] hover:brightness-110"
-                  style={{
-                    left: `${((x - rect.x) / rect.w) * 100}%`,
-                    top: `${((y - rect.y) / rect.h) * 100}%`,
-                    width: `${(w / rect.w) * 100}%`,
-                    height: `${(h / rect.h) * 100}%`,
-                    background: tone,
-                    opacity: 0.16 + intensity * 0.55,
-                  }}
-                  onMouseEnter={(e) => handleEnter(row.ticker, e)}
-                  onMouseMove={handleMove}
-                  onMouseLeave={() => setHoverTicker(null)}
-                >
-                  {showTicker && (
-                    <span className="tabular font-mono text-[0.68rem] font-semibold text-[var(--ink)]">
-                      {row.ticker}
-                    </span>
-                  )}
-                  {showWeight && (
-                    <span className="tabular font-mono text-[0.6rem] text-[var(--ink)]/70">
-                      {pct(row.weight, 1)}
-                    </span>
-                  )}
-                </div>
-              );
-            })}
           </div>
         ))}
       </div>
 
-      {hoverTicker && (
+      {hoverTicker && hoverRow && (
         <div
-          className="fixed z-50 pointer-events-none rounded-md border border-[var(--faint)]/40 bg-[var(--paper)] px-3 py-2.5 shadow-lg"
+          className="fixed z-[60] pointer-events-none rounded-md border border-[var(--faint)]/40 bg-[var(--paper)] px-3 py-2.5 shadow-lg w-[190px]"
           style={{ left: tooltipLeft, top: tooltipTop }}
         >
-          <div className="font-mono text-[0.65rem] tracking-wide uppercase text-[var(--muted)]">
-            {hoverTicker} <span className="text-[var(--faint)]">· 30d</span>
+          <div className="font-mono text-[0.65rem] tracking-wide uppercase text-[var(--muted)] truncate">
+            {hoverRow.ticker} <span className="text-[var(--faint)] normal-case">· {hoverRow.name}</span>
           </div>
           <div className="mt-1.5">
             {hoverData === "loading" || hoverData === undefined ? (
-              <div
-                style={{ width: SPARK_W, height: SPARK_H }}
-                className="flex items-center justify-center text-[10px] text-[var(--muted)] font-mono"
-              >
+              <div className="h-10 flex items-center justify-center text-[10px] text-[var(--muted)] font-mono">
                 loading…
               </div>
             ) : hoverData === "error" ? (
-              <div
-                style={{ width: SPARK_W, height: SPARK_H }}
-                className="flex items-center justify-center text-[10px] text-[var(--muted)] font-mono"
-              >
+              <div className="h-10 flex items-center justify-center text-[10px] text-[var(--muted)] font-mono">
                 no data
               </div>
             ) : (
               <>
                 <Sparkline
-                  points={hoverData}
-                  color={
-                    hoverData.length > 1 && hoverData.at(-1)!.close >= hoverData[0].close
-                      ? "var(--positive)"
-                      : "var(--negative)"
-                  }
+                  points={hoverData.map((p) => ({ date: p.date, value: p.close }))}
+                  color={hoverData.length > 1 && hoverData.at(-1)!.close >= hoverData[0].close ? "var(--positive)" : "var(--negative)"}
                 />
                 <div className="mt-1 flex items-center justify-between tabular font-mono text-xs">
                   <span>${hoverData.at(-1)?.close.toFixed(2)}</span>
@@ -223,30 +266,69 @@ export function PositionsTreemap({ positions }: { positions: HoldingRow[] }) {
                       }}
                     >
                       {(((hoverData.at(-1)!.close - hoverData[0].close) / hoverData[0].close) * 100).toFixed(1)}%
+                      <span className="text-[var(--faint)]"> /30d</span>
                     </span>
                   )}
                 </div>
               </>
             )}
           </div>
-          {(() => {
-            const row = positions.find((p) => p.ticker === hoverTicker);
-            if (!row) return null;
-            return (
-              <div className="mt-1.5 border-t border-[var(--faint)]/25 pt-1.5 tabular font-mono text-[0.65rem] text-[var(--muted)] flex flex-col gap-0.5">
-                <div className="flex justify-between gap-4">
-                  <span>weight</span>
-                  <span>{pct(row.weight)}</span>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <span>mkt value</span>
-                  <span>{money(row.market_value)}</span>
-                </div>
-              </div>
-            );
-          })()}
+          <div className="mt-1.5 border-t border-[var(--faint)]/25 pt-1.5 tabular font-mono text-[0.65rem] text-[var(--muted)] flex flex-col gap-0.5">
+            <div className="flex justify-between gap-4">
+              <span>weight</span>
+              <span>{pct(hoverRow.weight)}</span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span>mkt value</span>
+              <span>{money(hoverRow.market_value)}</span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span>unrl. p/l</span>
+              <span style={{ color: hoverRow.unrealized_pnl >= 0 ? "var(--positive)" : "var(--negative)" }}>
+                {money(hoverRow.unrealized_pnl)}
+              </span>
+            </div>
+          </div>
+          <div className="mt-1.5 text-[0.6rem] text-[var(--faint)] font-mono">click for full detail</div>
         </div>
       )}
+
+      {expandedSector && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--paper)]/85 backdrop-blur-sm px-6 py-10"
+          onClick={() => setExpandedSector(null)}
+        >
+          <div
+            className="w-full max-w-5xl h-full rounded-lg border border-[var(--faint)]/40 bg-[var(--paper)] px-8 py-8 shadow-xl flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between shrink-0">
+              <div className="font-mono text-[0.7rem] tracking-[0.18em] uppercase text-[var(--muted)]">
+                {expandedSector}
+              </div>
+              <button
+                type="button"
+                onClick={() => setExpandedSector(null)}
+                aria-label="Close"
+                className="font-mono text-xs text-[var(--muted)] hover:text-[var(--ink)]"
+              >
+                esc ✕
+              </button>
+            </div>
+            <div className="relative flex-1 min-h-0 mt-4">
+              <SectorMap
+                rows={bySector.get(expandedSector) ?? []}
+                onTileEnter={handleTileEnter}
+                onTileMove={handleTileMove}
+                onTileLeave={handleTileLeave}
+                onTileClick={handleTileClick}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detailRow && <StockDetailModal row={detailRow} onClose={() => setDetailRow(null)} />}
     </div>
   );
 }

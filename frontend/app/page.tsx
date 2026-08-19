@@ -5,7 +5,8 @@ import {
   getRollingSharpe,
   getDrawdownSeries,
 } from "@/lib/queries";
-import { BigStat, type BigStatDelta } from "@/components/BigStat";
+import { MetricWithSparkline } from "@/components/MetricWithSparkline";
+import type { BigStatDelta } from "@/components/BigStat";
 import { PixelArrow } from "@/components/PixelArrow";
 import { pct, num, signed } from "@/lib/format";
 
@@ -43,8 +44,15 @@ export default async function Page() {
   const dayTone: BigStatDelta["tone"] =
     dayDirection === "up" ? "positive" : dayDirection === "down" ? "negative" : "neutral";
 
+  // Hover series — full history for NAV, drawdown, is already fetched for
+  // the delta math below; reused rather than issuing extra queries.
+  const navHistory = drawdown
+    .filter((r) => r.nav !== null)
+    .map((r) => ({ date: r.date, value: Number(r.nav) }));
+
   // --- Sharpe (rolling 63d, delta = last two points of the same series) --
   const sharpeSeries = rollingSharpe.filter((r) => r.sharpe !== null);
+  const sharpeHistory = sharpeSeries.map((r) => ({ date: r.date, value: Number(r.sharpe) }));
   const sharpeCurr = sharpeSeries.at(-1)?.sharpe ?? null;
   const sharpePrev = sharpeSeries.at(-2)?.sharpe ?? null;
   const sharpeChange = sharpeCurr !== null && sharpePrev !== null ? sharpeCurr - sharpePrev : null;
@@ -53,6 +61,9 @@ export default async function Page() {
     sharpeDirection === "up" ? "positive" : sharpeDirection === "down" ? "negative" : "neutral";
 
   // --- Drawdown from peak (current, not historical max) ------------------
+  const ddHistory = drawdown
+    .filter((r) => r.drawdown !== null)
+    .map((r) => ({ date: r.date, value: Number(r.drawdown) * 100 }));
   const ddCurr = drawdown.at(-1)?.drawdown ?? null;
   const ddPrev = drawdown.at(-2)?.drawdown ?? null;
   const ddChange = ddCurr !== null && ddPrev !== null ? ddCurr - ddPrev : null;
@@ -74,12 +85,32 @@ export default async function Page() {
   const paceTone: BigStatDelta["tone"] =
     paceDirection === "up" ? "positive" : paceDirection === "down" ? "negative" : "neutral";
 
+  // Hover series for Ann. Return: no rolling-annualized series exists (see
+  // above), so this shows the trailing ~1y NAV path rebased to 0% at the
+  // window's start — an honest "how did the last year actually go" chart
+  // rather than a fabricated rolling-annualized computation.
+  const trailingWindow = navHistory.slice(-252);
+  const baseNav = trailingWindow[0]?.value ?? null;
+  const trailingReturnHistory = baseNav
+    ? trailingWindow.map((p) => ({ date: p.date, value: (p.value / baseNav - 1) * 100 }))
+    : [];
+  const trailingReturnColor =
+    trailingReturnHistory.length && trailingReturnHistory.at(-1)!.value < 0 ? "var(--negative)" : "var(--positive)";
+
   const asOf = nav?.date ? String(nav.date).slice(0, 10) : null;
 
   return (
     <div className="max-w-dashboard">
       {/* Hero: NAV + Day P&L */}
-      <BigStat label="NAV" value={fullMoney(navValue)} size="hero" />
+      <MetricWithSparkline
+        label="NAV"
+        value={fullMoney(navValue)}
+        size="hero"
+        series={navHistory}
+        seriesLabel="NAV · full history"
+        seriesFormat="money"
+        seriesColor="var(--positive)"
+      />
       <div className={`mt-4 flex items-center gap-2 ${dayTone === "positive" ? "text-[var(--positive)]" : dayTone === "negative" ? "text-[var(--negative)]" : "text-[var(--muted)]"}`}>
         <PixelArrow direction={dayDirection} className="h-4 w-4" />
         <span className="tabular font-mono text-lg">
@@ -92,7 +123,7 @@ export default async function Page() {
 
       {/* Secondary row: Sharpe, Drawdown, Ann. Return */}
       <div className="mt-14 md:mt-16 grid grid-cols-1 md:grid-cols-3 gap-12 md:gap-16 w-full">
-        <BigStat
+        <MetricWithSparkline
           label="Sharpe (63d)"
           value={num(sharpeCurr)}
           delta={{
@@ -100,8 +131,12 @@ export default async function Page() {
             tone: sharpeTone,
             label: sharpeChange !== null ? signed(sharpeChange, 2) : undefined,
           }}
+          series={sharpeHistory}
+          seriesLabel="Sharpe · 63d rolling"
+          seriesFormat="number"
+          seriesColor="var(--ink)"
         />
-        <BigStat
+        <MetricWithSparkline
           label="Drawdown"
           value={pct(ddCurr, 1)}
           delta={{
@@ -109,14 +144,22 @@ export default async function Page() {
             tone: ddTone,
             label: ddChange !== null ? signed(ddChange * 100, 1) + "%" : undefined,
           }}
+          series={ddHistory}
+          seriesLabel="Drawdown · from peak"
+          seriesFormat="percent"
+          seriesColor="var(--negative)"
         />
-        <BigStat
+        <MetricWithSparkline
           label="Ann. Return (1y)"
           value={pct(annReturn, 1)}
           delta={{
             direction: paceDirection,
             tone: paceTone,
           }}
+          series={trailingReturnHistory}
+          seriesLabel="Trailing 1y, rebased"
+          seriesFormat="percent"
+          seriesColor={trailingReturnColor}
         />
       </div>
 

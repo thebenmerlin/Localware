@@ -14,6 +14,8 @@ export default async function PositionsPage() {
     weight: Number(r.weight),
     market_value: Number(r.market_value),
     unrealized_pnl: Number(r.unrealized_pnl),
+    quantity: Number(r.quantity),
+    avg_cost: Number(r.avg_cost),
   }));
 
   const maxSectorWeight = Math.max(1e-9, ...sectors.map((s) => Math.abs(Number(s.weight))));
@@ -35,13 +37,13 @@ export default async function PositionsPage() {
         <h2 className="font-mono text-[0.7rem] tracking-[0.18em] uppercase text-[var(--muted)]">
           Sector exposure
         </h2>
-        <div className="mt-5 max-w-xl flex flex-col gap-3">
+        <div className="mt-5 max-w-2xl flex flex-col gap-3">
           {sectors.map((s) => {
             const w = Number(s.weight);
             const barWidth = (Math.abs(w) / maxSectorWeight) * 100;
             return (
               <div key={s.sector} className="flex items-center gap-3">
-                <div className="w-32 shrink-0 font-mono text-xs text-[var(--muted)] truncate">
+                <div className="w-52 shrink-0 font-mono text-xs text-[var(--muted)]">
                   {s.sector || "—"}
                 </div>
                 <div className="flex-1 h-2 rounded-full bg-[var(--faint)]/15 overflow-hidden">
