@@ -23,7 +23,7 @@ type PriceEntry = PricePoint[] | "loading" | "error";
 // Virtual coordinate system the sector *blocks* are arranged in (not the
 // tiles inside them — see SectorMap, which measures its own real size).
 const W = 1000;
-const H = 560;
+const H = 720;
 const SECTOR_LABEL_H = 22;
 const SECTOR_PAD = 4;
 
@@ -41,11 +41,11 @@ function toneOf(row: HoldingRow) {
 // MIN_FONT_PX — below that a label just isn't readable, so the tile goes
 // unlabeled rather than rendering illegible text. JetBrains Mono runs about
 // 0.62em per character; 0.62 * heightPx approximates "font fits one line."
-const MIN_FONT_PX = 5;
+const MIN_FONT_PX = 4;
 const MAX_FONT_PX = 11;
 function fitFontPx(text: string, widthPx: number, heightPx: number): number {
-  const byWidth = widthPx / (text.length * 0.62 + 0.3);
-  const byHeight = heightPx * 0.62;
+  const byWidth = widthPx / (text.length * 0.6 + 0.2);
+  const byHeight = heightPx * 0.68;
   return Math.floor(Math.min(MAX_FONT_PX, byWidth, byHeight));
 }
 
@@ -104,8 +104,8 @@ function SectorMap({
         if (!row) return null;
         const realW = t.w * scale;
         const realH = t.h * scale;
-        const innerW = Math.max(0, realW - 5);
-        const innerH = Math.max(0, realH - 4);
+        const innerW = Math.max(0, realW - 3);
+        const innerH = Math.max(0, realH - 2);
         const tickerFontPx = scale > 0 ? fitFontPx(row.ticker, innerW, innerH) : 0;
         const showTicker = tickerFontPx >= MIN_FONT_PX;
         const weightText = pct(row.weight, 1);
@@ -137,7 +137,7 @@ function SectorMap({
               className="absolute inset-0 transition-[filter] group-hover:brightness-110"
               style={{ background: tone.color, opacity: tone.opacity }}
             />
-            <div className="relative flex flex-col items-start justify-start px-1.5 py-1 h-full">
+            <div className="relative flex flex-col items-start justify-start px-1 py-0.5 h-full">
               {showTicker && (
                 <span
                   className="tabular font-mono font-semibold leading-none text-[var(--ink)] whitespace-nowrap"
