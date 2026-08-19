@@ -12,7 +12,7 @@ export interface BigStatDelta {
   label?: string;
 }
 
-const toneClass: Record<Tone, string> = {
+export const toneClass: Record<Tone, string> = {
   positive: "text-[var(--positive)]",
   negative: "text-[var(--negative)]",
   neutral: "text-[var(--muted)]",
