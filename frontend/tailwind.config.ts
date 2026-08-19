@@ -12,6 +12,7 @@ const config: Config = {
         faint:    "var(--faint)",
         positive: "var(--positive)",
         negative: "var(--negative)",
+        accent:   "var(--accent)",
       },
       fontFamily: {
         display: ['"Source Serif 4"', "Georgia", "serif"],

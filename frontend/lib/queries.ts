@@ -62,13 +62,20 @@ export async function getPreviousNav() {
 
 export async function getEquityCurve() {
   return sql<
-    { date: string; nav: number; daily_return: number | null; cumulative_return: number | null }[]
+    {
+      date: string;
+      nav: number;
+      daily_return: number | null;
+      cumulative_return: number | null;
+      benchmark_cumret: number | null;
+    }[]
   >`
     SELECT
       date,
       nav::float               AS nav,
       daily_return::float      AS daily_return,
-      cumulative_return::float AS cumulative_return
+      cumulative_return::float AS cumulative_return,
+      benchmark_cumret::float  AS benchmark_cumret
     FROM analytics.equity_curve
     ORDER BY date;
   `;

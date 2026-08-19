@@ -46,7 +46,7 @@ export function ChartCard({
 
   return (
     <>
-      <div className="group relative w-full rounded-lg border border-[var(--faint)]/30 px-5 py-5 transition-colors hover:border-[var(--faint)]/60">
+      <div className="hover-glow group relative w-full rounded-lg border border-[var(--faint)]/30 px-5 py-5 transition-colors hover:border-[var(--faint)]/60">
         <div className="flex items-start justify-between">
           <div>
             <div className="font-mono text-[0.65rem] tracking-[0.14em] uppercase text-[var(--muted)]">

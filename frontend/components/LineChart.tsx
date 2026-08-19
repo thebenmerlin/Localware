@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 
 export interface LineChartPoint {
   date: string;
@@ -55,7 +55,8 @@ function niceTicks(min: number, max: number, count: number): number[] {
  * value is never drawn inside the plot (it used to collide with the line
  * near series highs) — callers show it in a header above the chart instead.
  * One color in, one series shown — no legend needed per dataviz's
- * single-series rule.
+ * single-series rule (a `secondary` overlay is the one exception, for
+ * benchmark comparison — its legend lives in the caller, not here).
  */
 export function LineChart({
   data,
@@ -65,6 +66,9 @@ export function LineChart({
   zeroLine = false,
   compact = false,
   interactive = true,
+  glow = false,
+  animate = false,
+  secondary,
 }: {
   data: LineChartPoint[];
   color: string;
@@ -78,20 +82,33 @@ export function LineChart({
   compact?: boolean;
   /** Set false only for a truly static, non-scrubbable preview. */
   interactive?: boolean;
+  /** Soft blurred halo behind the stroke — reserve for a single hero chart. */
+  glow?: boolean;
+  /** One-time stroke draw-in on mount. Off by default so scrubbing a card
+   *  never replays it (it wouldn't anyway — same element, no remount — but
+   *  compact previews don't need the motion at all). */
+  animate?: boolean;
+  /** A second series sharing this chart's y-domain, drawn under the
+   *  primary line (e.g. a benchmark). Must be the same length/order as
+   *  `data` — the caller aligns dates, this just plots by index. */
+  secondary?: { data: LineChartPoint[]; color: string };
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const glowId = useId();
   const width = 720;
   const padding = compact
     ? { top: 16, right: 4, bottom: 4, left: 4 }
     : { top: 12, right: 16, bottom: 28, left: 56 };
 
-  const { path, area, points, yMin, yMax, yTicks, xTickIdx } = useMemo(() => {
+  const { path, area, points, secondaryPath, secondaryPoints, yMin, yMax, yTicks, xTickIdx } = useMemo(() => {
     if (data.length === 0) {
       return {
         path: "",
         area: "",
         points: [] as { x: number; y: number }[],
+        secondaryPath: "",
+        secondaryPoints: [] as { x: number; y: number }[],
         yMin: 0,
         yMax: 0,
         yTicks: [] as number[],
@@ -99,6 +116,7 @@ export function LineChart({
       };
     }
     const values = data.map((d) => d.value);
+    if (secondary) values.push(...secondary.data.map((d) => d.value));
     let yMin = Math.min(...values);
     let yMax = Math.max(...values);
     if (zeroLine) yMin = Math.min(yMin, 0);
@@ -113,15 +131,23 @@ export function LineChart({
     }
     const innerW = width - padding.left - padding.right;
     const innerH = height - padding.top - padding.bottom;
-    const points = data.map((d, i) => ({
-      x: padding.left + (i / (data.length - 1 || 1)) * innerW,
-      y: padding.top + innerH - ((d.value - yMin) / (yMax - yMin)) * innerH,
-    }));
-    const path = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ");
+    const toPoints = (series: LineChartPoint[]) =>
+      series.map((d, i) => ({
+        x: padding.left + (i / (series.length - 1 || 1)) * innerW,
+        y: padding.top + innerH - ((d.value - yMin) / (yMax - yMin)) * innerH,
+      }));
+    const toPath = (pts: { x: number; y: number }[]) =>
+      pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ");
+
+    const points = toPoints(data);
+    const path = toPath(points);
     const baseline = padding.top + innerH;
     const area =
       path +
       ` L${points[points.length - 1].x.toFixed(2)},${baseline} L${points[0].x.toFixed(2)},${baseline} Z`;
+
+    const secondaryPoints = secondary ? toPoints(secondary.data) : [];
+    const secondaryPath = secondary ? toPath(secondaryPoints) : "";
 
     // Up to 5 evenly spaced x-axis labels, always including first/last.
     const xTickCount = Math.min(5, data.length);
@@ -130,8 +156,8 @@ export function LineChart({
         ? [0]
         : Array.from({ length: xTickCount }, (_, i) => Math.round((i * (data.length - 1)) / (xTickCount - 1)));
 
-    return { path, area, points, yMin, yMax, yTicks, xTickIdx };
-  }, [data, height, zeroLine, compact, padding.left, padding.right, padding.top, padding.bottom]);
+    return { path, area, points, secondaryPath, secondaryPoints, yMin, yMax, yTicks, xTickIdx };
+  }, [data, secondary, height, zeroLine, compact, padding.left, padding.right, padding.top, padding.bottom]);
 
   function handleMove(e: React.PointerEvent<SVGSVGElement>) {
     if (!interactive || !svgRef.current || points.length === 0) return;
@@ -168,6 +194,18 @@ export function LineChart({
         onPointerDown={handleMove}
         onPointerLeave={() => setHoverIdx(null)}
       >
+        {glow && (
+          <defs>
+            <filter id={glowId} x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="5" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+        )}
+
         {/* y-axis gridlines + ticks */}
         {!compact &&
           yTicks.map((t) => (
@@ -207,14 +245,30 @@ export function LineChart({
           />
         )}
 
+        {secondary && (
+          <path
+            d={secondaryPath}
+            fill="none"
+            stroke={secondary.color}
+            strokeWidth={compact ? 1.25 : 1.75}
+            strokeDasharray="5 4"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            opacity={0.85}
+          />
+        )}
+
         <path d={area} fill={color} opacity={0.08} stroke="none" />
         <path
           d={path}
+          pathLength={animate ? 1000 : undefined}
           fill="none"
           stroke={color}
           strokeWidth={compact ? 1.5 : 2}
           strokeLinejoin="round"
           strokeLinecap="round"
+          className={animate ? "chart-draw-in" : undefined}
+          filter={glow ? `url(#${glowId})` : undefined}
         />
 
         {/* x-axis date ticks */}
@@ -243,6 +297,16 @@ export function LineChart({
               stroke="var(--faint)"
               strokeWidth={1}
             />
+            {secondary && secondaryPoints[hoverIdx!] && (
+              <circle
+                cx={secondaryPoints[hoverIdx!].x}
+                cy={secondaryPoints[hoverIdx!].y}
+                r={3.5}
+                fill={secondary.color}
+                stroke="var(--paper)"
+                strokeWidth={2}
+              />
+            )}
             <circle cx={hover.point.x} cy={hover.point.y} r={4} fill={color} stroke="var(--paper)" strokeWidth={2} />
           </>
         )}
@@ -259,7 +323,14 @@ export function LineChart({
             }) translateY(calc(-100% - 8px))`,
           }}
         >
-          <div className="tabular font-semibold">{formatValue(hover.datum.value, format)}</div>
+          <div className="tabular font-semibold" style={{ color }}>
+            {formatValue(hover.datum.value, format)}
+          </div>
+          {secondary && secondary.data[hoverIdx!] && (
+            <div className="tabular font-semibold" style={{ color: secondary.color }}>
+              {formatValue(secondary.data[hoverIdx!].value, format)}
+            </div>
+          )}
           <div className="text-[var(--muted)]">{formatDate(hover.datum.date)}</div>
         </div>
       )}

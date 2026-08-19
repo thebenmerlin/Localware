@@ -11,17 +11,31 @@
   --faint: #a8a79e;
   --positive: #15613f;
   --negative: #9a2020;
+  --accent: #9a6b12;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="terminal"]) {
     --paper: #111110;
     --ink: #f2f1ec;
     --muted: #8c8b83;
     --faint: #5c5b54;
     --positive: #4ade9a;
     --negative: #f0716a;
+    --accent: #e0b34d;
   }
+}
+
+/* Manually-toggled CRT/phosphor theme — see components/ThemeToggle.tsx.
+   Independent of prefers-color-scheme so it always wins when set. */
+:root[data-theme="terminal"] {
+  --paper: #05100a;
+  --ink: #4dffa0;
+  --muted: #339e69;
+  --faint: #1d5c40;
+  --positive: #7dffc4;
+  --negative: #ff6b5e;
+  --accent: #ffb347;
 }
 
 * {
@@ -39,9 +53,96 @@ body {
   font-family: "Source Serif 4", Georgia, serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+:root[data-theme="terminal"] body {
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+}
+
+/* Headings/values opt into the serif via Tailwind's `font-display` utility,
+   which otherwise out-specifies the body-level swap above. A CRT doesn't
+   render serif type, so terminal mode wins here too. */
+:root[data-theme="terminal"] .font-display {
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+}
+
+/* Faint CRT scanlines, terminal mode only — decorative, never intercepts input. */
+:root[data-theme="terminal"] body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.22) 0px,
+    rgba(0, 0, 0, 0.22) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  mix-blend-mode: overlay;
+  opacity: 0.55;
 }
 
 .tabular {
   font-variant-numeric: tabular-nums lining-nums;
   font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+/* Text glow — inert by default, lit up only in terminal mode so serif/dark
+   themes never get a haze that wasn't designed for them. */
+.glow-text {
+  text-shadow: none;
+}
+:root[data-theme="terminal"] .glow-text {
+  text-shadow: 0 0 10px currentColor, 0 0 3px currentColor;
+}
+
+.terminal-cursor::after {
+  content: "";
+}
+:root[data-theme="terminal"] .terminal-cursor::after {
+  content: "_";
+  margin-left: 2px;
+  animation: blink 1s steps(1) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Soft ambient hover glow for card surfaces. */
+.hover-glow {
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+.hover-glow:hover {
+  box-shadow: 0 0 28px -10px var(--ink);
+}
+:root[data-theme="terminal"] .hover-glow:hover {
+  box-shadow: 0 0 32px -6px var(--positive);
+}
+
+/* Line-chart draw-in: paired with pathLength={1000} on the <path>. */
+@keyframes chart-draw {
+  from {
+    stroke-dashoffset: 1000;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.chart-draw-in {
+  stroke-dasharray: 1000;
+  animation: chart-draw 1.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chart-draw-in {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .terminal-cursor::after {
+    animation: none;
+  }
 }
