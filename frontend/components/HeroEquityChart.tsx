@@ -24,12 +24,14 @@ export function HeroEquityChart({
   currentNav,
   portfolioReturn,
   benchmarkReturn,
+  height = 380,
 }: {
   navSeries: LineChartPoint[];
   benchmarkSeries: LineChartPoint[];
   currentNav: number | null;
   portfolioReturn: number | null;
   benchmarkReturn: number | null;
+  height?: number;
 }) {
   return (
     <div className="hover-glow w-full rounded-lg border border-[var(--faint)]/30 px-6 py-6 md:px-8 md:py-8">
@@ -76,7 +78,7 @@ export function HeroEquityChart({
           data={navSeries}
           color="var(--positive)"
           format="money"
-          height={380}
+          height={height}
           glow
           animate
           secondary={benchmarkSeries.length ? { data: benchmarkSeries, color: "var(--accent)" } : undefined}

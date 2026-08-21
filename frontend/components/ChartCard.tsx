@@ -25,12 +25,14 @@ export function ChartCard({
   color,
   format,
   zeroLine = false,
+  height = 110,
 }: {
   title: string;
   data: LineChartPoint[];
   color: string;
   format: Format;
   zeroLine?: boolean;
+  height?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const current = data.length ? data[data.length - 1].value : null;
@@ -68,7 +70,7 @@ export function ChartCard({
           </button>
         </div>
         <div className="mt-4">
-          <LineChart data={data} color={color} format={format} zeroLine={zeroLine} height={110} compact />
+          <LineChart data={data} color={color} format={format} zeroLine={zeroLine} height={height} compact />
         </div>
       </div>
 

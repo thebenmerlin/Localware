@@ -33,16 +33,16 @@ export function MonthlyReturnsHeatmap({ rows }: { rows: MonthlyReturn[] }) {
 
   return (
     <div className="overflow-x-auto">
-      <table className="border-collapse text-sm">
+      <table className="border-collapse text-[0.7rem] w-full">
         <thead>
-          <tr className="font-mono text-[0.62rem] tracking-[0.1em] uppercase text-[var(--faint)]">
-            <th className="font-normal pb-2 pr-4 text-left">Year</th>
+          <tr className="font-mono text-[0.6rem] tracking-[0.05em] uppercase text-[var(--faint)]">
+            <th className="font-normal pb-1.5 pr-2 text-left">Year</th>
             {MONTH_LABELS.map((m) => (
-              <th key={m} className="font-normal pb-2 px-1.5 text-right">
+              <th key={m} className="font-normal pb-1.5 px-0.5 text-right">
                 {m}
               </th>
             ))}
-            <th className="font-normal pb-2 pl-4 text-right">Year</th>
+            <th className="font-normal pb-1.5 pl-2 text-right">Year</th>
           </tr>
         </thead>
         <tbody className="tabular font-mono">
@@ -52,13 +52,13 @@ export function MonthlyReturnsHeatmap({ rows }: { rows: MonthlyReturn[] }) {
             const yearRet = known.length ? known.reduce((acc, r) => acc * (1 + r), 1) - 1 : null;
             return (
               <tr key={year} className="border-t border-[var(--faint)]/10">
-                <td className="py-1.5 pr-4 text-[var(--muted)]">{year}</td>
+                <td className="py-1 pr-2 text-[var(--muted)]">{year}</td>
                 {monthVals.map((v, i) => (
-                  <td key={i} className="py-1.5 px-1.5 text-right rounded-sm" style={{ background: cellBg(v) }}>
+                  <td key={i} className="py-1 px-0.5 text-right rounded-sm" style={{ background: cellBg(v) }}>
                     {v === null ? <span className="text-[var(--faint)]">—</span> : pct(v, 1)}
                   </td>
                 ))}
-                <td className="py-1.5 pl-4 text-right font-semibold">{yearRet === null ? "—" : pct(yearRet, 1)}</td>
+                <td className="py-1 pl-2 text-right font-semibold">{yearRet === null ? "—" : pct(yearRet, 1)}</td>
               </tr>
             );
           })}

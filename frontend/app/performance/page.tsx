@@ -68,36 +68,42 @@ export default async function PerformancePage() {
         </p>
       )}
 
-      <HeroEquityChart
-        navSeries={navSeries}
-        benchmarkSeries={benchmarkSeries}
-        currentNav={currentNav}
-        portfolioReturn={portfolioReturn}
-        benchmarkReturn={benchmarkReturn}
-      />
-
-      <section>
-        <h2 className="font-mono text-[0.7rem] tracking-[0.18em] uppercase text-[var(--muted)]">Key metrics</h2>
-        <div className="mt-5 max-w-2xl">
-          <PerformanceMetricsTable metrics={allMetrics} />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 lg:gap-10 items-stretch">
+        <div className="lg:col-span-2">
+          <HeroEquityChart
+            navSeries={navSeries}
+            benchmarkSeries={benchmarkSeries}
+            currentNav={currentNav}
+            portfolioReturn={portfolioReturn}
+            benchmarkReturn={benchmarkReturn}
+            height={280}
+          />
         </div>
-      </section>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 lg:gap-10">
-        <ChartCard title="Drawdown from peak" data={ddSeries} color="var(--negative)" format="percent" zeroLine />
-        <ChartCard title="Rolling Sharpe (63d)" data={sharpeSeries} color="var(--ink)" format="number" zeroLine />
+        <div className="flex flex-col gap-6">
+          <ChartCard title="Drawdown from peak" data={ddSeries} color="var(--negative)" format="percent" zeroLine height={130} />
+          <ChartCard title="Rolling Sharpe (63d)" data={sharpeSeries} color="var(--ink)" format="number" zeroLine height={130} />
+        </div>
       </div>
 
-      {monthly.length > 0 && (
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-10">
         <section>
-          <h2 className="font-mono text-[0.7rem] tracking-[0.18em] uppercase text-[var(--muted)]">
-            Monthly returns
-          </h2>
+          <h2 className="font-mono text-[0.7rem] tracking-[0.18em] uppercase text-[var(--muted)]">Key metrics</h2>
           <div className="mt-5">
-            <MonthlyReturnsHeatmap rows={monthly} />
+            <PerformanceMetricsTable metrics={allMetrics} />
           </div>
         </section>
-      )}
+
+        {monthly.length > 0 && (
+          <section>
+            <h2 className="font-mono text-[0.7rem] tracking-[0.18em] uppercase text-[var(--muted)]">
+              Monthly returns
+            </h2>
+            <div className="mt-5">
+              <MonthlyReturnsHeatmap rows={monthly} />
+            </div>
+          </section>
+        )}
+      </div>
     </div>
   );
 }
