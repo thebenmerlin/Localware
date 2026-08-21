@@ -1,14 +1,19 @@
-import { getEquityCurve, getDrawdownSeries, getRollingSharpe } from "@/lib/queries";
+import { getEquityCurve, getDrawdownSeries, getRollingSharpe, getAllMetrics, getMonthlyReturns } from "@/lib/queries";
 import { ChartCard } from "@/components/ChartCard";
 import { HeroEquityChart } from "@/components/HeroEquityChart";
+import { PerformanceMetricsTable } from "@/components/PerformanceMetricsTable";
+import { MonthlyReturnsHeatmap } from "@/components/MonthlyReturnsHeatmap";
+import { pct, num } from "@/lib/format";
 
 export const revalidate = 600;
 
 export default async function PerformancePage() {
-  const [equity, drawdown, rollingSharpe] = await Promise.all([
+  const [equity, drawdown, rollingSharpe, allMetrics, monthly] = await Promise.all([
     getEquityCurve(),
     getDrawdownSeries(),
     getRollingSharpe(63),
+    getAllMetrics(),
+    getMonthlyReturns(),
   ]);
 
   // Prefer the intersection of nav + benchmark rows so both series line up
@@ -39,8 +44,30 @@ export default async function PerformancePage() {
     .filter((r) => r.sharpe !== null)
     .map((r) => ({ date: r.date, value: Number(r.sharpe) }));
 
+  const sinceInception = allMetrics.find((m) => m.period === "all") ?? null;
+  const ddCurr = drawdown.at(-1)?.drawdown ?? null;
+
   return (
-    <div className="max-w-wide flex flex-col gap-10">
+    <div className="max-w-wide flex flex-col gap-12">
+      {sinceInception && (
+        <p className="font-display text-lg md:text-xl leading-relaxed max-w-3xl text-[var(--ink)]">
+          Since inception, the fund has returned{" "}
+          <span
+            className="tabular font-semibold"
+            style={{ color: (sinceInception.total_return ?? 0) >= 0 ? "var(--positive)" : "var(--negative)" }}
+          >
+            {pct(sinceInception.total_return, 1)}
+          </span>
+          , annualizing to <span className="tabular font-semibold">{pct(sinceInception.ann_return, 1)}</span> at{" "}
+          <span className="tabular font-semibold">{pct(sinceInception.ann_vol, 1)}</span> volatility (Sharpe{" "}
+          <span className="tabular font-semibold">{num(sinceInception.sharpe, 2)}</span>). The book is currently{" "}
+          <span className="tabular font-semibold" style={{ color: "var(--negative)" }}>
+            {pct(ddCurr !== null ? Math.abs(ddCurr) : null, 1)}
+          </span>{" "}
+          below its high-water mark.
+        </p>
+      )}
+
       <HeroEquityChart
         navSeries={navSeries}
         benchmarkSeries={benchmarkSeries}
@@ -49,10 +76,28 @@ export default async function PerformancePage() {
         benchmarkReturn={benchmarkReturn}
       />
 
+      <section>
+        <h2 className="font-mono text-[0.7rem] tracking-[0.18em] uppercase text-[var(--muted)]">Key metrics</h2>
+        <div className="mt-5 max-w-2xl">
+          <PerformanceMetricsTable metrics={allMetrics} />
+        </div>
+      </section>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 lg:gap-10">
         <ChartCard title="Drawdown from peak" data={ddSeries} color="var(--negative)" format="percent" zeroLine />
         <ChartCard title="Rolling Sharpe (63d)" data={sharpeSeries} color="var(--ink)" format="number" zeroLine />
       </div>
+
+      {monthly.length > 0 && (
+        <section>
+          <h2 className="font-mono text-[0.7rem] tracking-[0.18em] uppercase text-[var(--muted)]">
+            Monthly returns
+          </h2>
+          <div className="mt-5">
+            <MonthlyReturnsHeatmap rows={monthly} />
+          </div>
+        </section>
+      )}
     </div>
   );
 }

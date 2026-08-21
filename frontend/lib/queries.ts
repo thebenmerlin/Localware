@@ -85,8 +85,23 @@ export async function getEquityCurve() {
 // Performance metrics
 // ---------------------------------------------------------------------------
 
+export interface PerformanceMetrics {
+  period: Period;
+  as_of: string;
+  total_return: number | null;
+  ann_return: number | null;
+  ann_vol: number | null;
+  sharpe: number | null;
+  sortino: number | null;
+  max_drawdown: number | null;
+  calmar: number | null;
+  hit_rate: number | null;
+  beta: number | null;
+  alpha: number | null;
+}
+
 export async function getMetrics(period: Period = "all") {
-  const rows = await sql`
+  const rows = await sql<PerformanceMetrics[]>`
     SELECT
       period, as_of,
       total_return::float AS total_return,
@@ -107,7 +122,7 @@ export async function getMetrics(period: Period = "all") {
 }
 
 export async function getAllMetrics() {
-  return sql`
+  return sql<PerformanceMetrics[]>`
     SELECT
       period, as_of,
       total_return::float AS total_return,
